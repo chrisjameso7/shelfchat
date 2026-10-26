@@ -81,3 +81,7 @@ To rebuild the manifest from cached source metadata, run `node scripts/build-arc
 Uploads accept PDF/EPUB up to 25 MB with signature validation, or public HTTPS links. Contributors must affirm sharing rights. Rendered text is escaped by React. This anonymous contribution model intentionally has no account ownership or impersonation protection. Before a public launch at scale, establish moderation/takedown operations, malware scanning and quotas appropriate to your host. File signature checks are not malware scanning. Public-domain status varies by jurisdiction; review the seeded works for your audience. Seeded links depend on the external provider's availability.
 
 Cloud resources are provisioned separately through Vercel Marketplace. The repository does not purchase or configure a custom domain automatically.
+
+## Large catalogs and browser reader
+
+See [the two-million-record operations guide](docs/catalog-at-scale.md) for streaming JSON/CSV imports, Open Library dump preparation, resumable checkpoints, rights metadata, indexed cursor pagination, database sizing, and EPUB/PDF browser reading. The repository does not bundle two million files; discovery records and downloadable editions are explicitly distinct.

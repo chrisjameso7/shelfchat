@@ -140,19 +140,12 @@ export default function App() {
         <Routes>
           <Route
             path="/"
-            element={
-              <Catalog
-                data={data}
-                loading={!connected && !data.books.length}
-                onUpload={() => setModal("upload")}
-              />
-            }
+            element={<Catalog onUpload={() => setModal("upload")} />}
           />
           <Route
             path="/book/:id"
             element={
               <Detail
-                data={data}
                 identity={identity}
                 chooseIdentity={() => setModal("identity")}
               />

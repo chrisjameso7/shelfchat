@@ -152,3 +152,6 @@ vite.config.ts.timestamp-*
 data/
 *.tsbuildinfo
 
+
+*.checkpoint.json
+*.rejects.jsonl

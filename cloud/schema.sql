@@ -47,3 +47,49 @@ ALTER TABLE shelfchat_books ADD COLUMN IF NOT EXISTS source_url text;
 ALTER TABLE shelfchat_books ADD COLUMN IF NOT EXISTS license_url text;
 -- statement
 ALTER TABLE shelfchat_books ADD COLUMN IF NOT EXISTS published_year integer;
+-- statement
+ALTER TABLE shelfchat_books ALTER COLUMN format DROP NOT NULL, ALTER COLUMN url DROP NOT NULL;
+-- statement
+ALTER TABLE shelfchat_books ADD COLUMN IF NOT EXISTS availability text NOT NULL DEFAULT 'downloadable' CHECK(availability IN ('downloadable','discovery'));
+-- statement
+ALTER TABLE shelfchat_books ADD COLUMN IF NOT EXISTS tags text[] NOT NULL DEFAULT '{}';
+-- statement
+ALTER TABLE shelfchat_books ADD COLUMN IF NOT EXISTS search_document tsvector GENERATED ALWAYS AS (to_tsvector('simple',title||' '||author||' '||description)) STORED;
+-- statement
+CREATE INDEX IF NOT EXISTS shelfchat_books_search ON shelfchat_books USING gin(search_document);
+-- statement
+CREATE INDEX IF NOT EXISTS shelfchat_books_tags ON shelfchat_books USING gin(tags);
+-- statement
+CREATE INDEX IF NOT EXISTS shelfchat_books_editions ON shelfchat_books USING gin(editions);
+-- statement
+CREATE INDEX IF NOT EXISTS shelfchat_books_recent_cursor ON shelfchat_books(created_at DESC,id DESC);
+-- statement
+CREATE INDEX IF NOT EXISTS shelfchat_books_title_cursor ON shelfchat_books(lower(title),id);
+-- statement
+CREATE INDEX IF NOT EXISTS shelfchat_books_popular_cursor ON shelfchat_books(downloads DESC,id DESC);
+-- statement
+CREATE INDEX IF NOT EXISTS shelfchat_books_category_recent ON shelfchat_books(category,created_at DESC,id DESC);
+-- statement
+CREATE TABLE IF NOT EXISTS shelfchat_catalog_stats (id boolean PRIMARY KEY DEFAULT true CHECK(id),book_count bigint NOT NULL DEFAULT 0);
+-- statement
+ALTER TABLE shelfchat_catalog_stats ENABLE ROW LEVEL SECURITY;
+-- statement
+DO $$ BEGIN IF NOT EXISTS(SELECT 1 FROM shelfchat_catalog_stats WHERE id=true) THEN INSERT INTO shelfchat_catalog_stats(id,book_count) SELECT true,count(*) FROM shelfchat_books; END IF; END $$;
+-- statement
+CREATE OR REPLACE FUNCTION shelfchat_catalog_count_insert() RETURNS trigger LANGUAGE plpgsql SET search_path=public AS $$ BEGIN UPDATE shelfchat_catalog_stats SET book_count=book_count+(SELECT count(*) FROM inserted_books) WHERE id=true; RETURN NULL; END $$;
+-- statement
+CREATE OR REPLACE FUNCTION shelfchat_catalog_count_delete() RETURNS trigger LANGUAGE plpgsql SET search_path=public AS $$ BEGIN UPDATE shelfchat_catalog_stats SET book_count=book_count-(SELECT count(*) FROM deleted_books) WHERE id=true; RETURN NULL; END $$;
+-- statement
+DROP TRIGGER IF EXISTS shelfchat_catalog_count_trigger ON shelfchat_books;
+-- statement
+DROP TRIGGER IF EXISTS shelfchat_catalog_insert_count ON shelfchat_books;
+-- statement
+DROP TRIGGER IF EXISTS shelfchat_catalog_delete_count ON shelfchat_books;
+-- statement
+CREATE TRIGGER shelfchat_catalog_insert_count AFTER INSERT ON shelfchat_books REFERENCING NEW TABLE AS inserted_books FOR EACH STATEMENT EXECUTE FUNCTION shelfchat_catalog_count_insert();
+-- statement
+CREATE TRIGGER shelfchat_catalog_delete_count AFTER DELETE ON shelfchat_books REFERENCING OLD TABLE AS deleted_books FOR EACH STATEMENT EXECUTE FUNCTION shelfchat_catalog_count_delete();
+-- statement
+CREATE INDEX IF NOT EXISTS shelfchat_activity_time ON shelfchat_activity(created_at DESC);
+-- statement
+CREATE INDEX IF NOT EXISTS shelfchat_books_available_recent ON shelfchat_books(created_at DESC,id DESC) WHERE availability='downloadable';

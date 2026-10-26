@@ -9,6 +9,8 @@ export type Book = {
   downloads: number;
   description: string;
   createdAt: string;
+  availability?: "downloadable" | "discovery";
+  tags?: string[];
   editions?: Record<string, { size: number }>;
   sourceUrl?: string;
   licenseUrl?: string;

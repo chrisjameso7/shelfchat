@@ -45,3 +45,53 @@ if (existsSync(archiveFile)) {
     `Archive verified: 1000 books, 2000 PDF/EPUB files; ${added.length} new books added.`,
   );
 }
+
+const { normalize, insertBatch } = await import(
+  "../scripts/import-library.mjs"
+);
+const discovery = JSON.parse(
+  readFileSync(new URL("./discovery-books.json", import.meta.url), "utf8"),
+);
+const discoveryRows = discovery.map((b) =>
+  normalize({
+    ...b,
+    availability: "discovery",
+    sourceUrl:
+      "https://openlibrary.org/search?q=" +
+      encodeURIComponent(b.title + " " + b.author),
+  }),
+);
+const batch = insertBatch(discoveryRows);
+await sql.query(batch.text, batch.values);
+console.log(
+  "Editorial discovery collection verified:",
+  discoveryRows.length,
+  "titles (metadata only).",
+);
+const { catalogPage } = await import("./catalog.js");
+const page = await catalogPage(
+  sql,
+  new URLSearchParams({ tag: "booktok", limit: "2" }),
+);
+if (
+  page.books.length !== 2 ||
+  !page.nextCursor ||
+  page.books.some((b) => b.availability !== "discovery")
+)
+  throw Error("Paged discovery catalog verification failed.");
+const next = await catalogPage(
+  sql,
+  new URLSearchParams({ tag: "booktok", limit: "2", cursor: page.nextCursor }),
+);
+if (next.books.some((b) => page.books.some((a) => a.id === b.id)))
+  throw Error("Catalog cursor returned duplicate rows.");
+const search = await catalogPage(
+  sql,
+  new URLSearchParams({ q: "Fourth Wing" }),
+);
+if (!search.books.some((b) => b.id === "discovery-fourth-wing"))
+  throw Error("Indexed catalog search verification failed.");
+console.log(
+  "Neon search, cursor pagination, discovery availability and catalog count verified:",
+  page.total,
+);

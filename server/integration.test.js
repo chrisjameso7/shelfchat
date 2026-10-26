@@ -53,6 +53,36 @@ test("shared catalog, uploads, marginalia, downloads and live feed", async () =>
     response = await fetch(base + "/books", { method: "POST", body: form });
     assert.equal(response.status, 201);
     const { id } = await response.json();
+    const detail = await (await fetch(`${base}/books/${id}`)).json();
+    assert.equal(detail.book.title, "Test Archive");
+    assert.equal(detail.book.downloads, 0);
+    const read = await (
+      await fetch(`${base}/books/${id}/read?format=PDF`)
+    ).json();
+    assert.equal(read.format, "PDF");
+    const content = await fetch(new URL(read.url, base));
+    assert.equal(content.status, 200);
+    assert.equal(content.headers.get("content-disposition"), "inline");
+    assert.match(await content.text(), /%PDF/);
+    assert.equal(
+      (await (await fetch(`${base}/books/${id}`)).json()).book.downloads,
+      0,
+    );
+    const firstPage = await (await fetch(base + "/catalog?limit=2")).json();
+    assert.equal(firstPage.books.length, 2);
+    assert.ok(firstPage.nextCursor);
+    const secondPage = await (
+      await fetch(base + "/catalog?limit=2&cursor=" + firstPage.nextCursor)
+    ).json();
+    assert.ok(
+      secondPage.books.every(
+        (b) => !firstPage.books.some((a) => a.id === b.id),
+      ),
+    );
+    assert.equal(
+      (await fetch(`${base}/books/${id}/read?format=BAD`)).status,
+      404,
+    );
     response = await fetch(`${base}/books/${id}/notes`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },

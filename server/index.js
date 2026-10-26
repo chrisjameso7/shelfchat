@@ -24,6 +24,8 @@ const columns = db
   .all()
   .map((c) => c.name);
 for (const [column, type] of Object.entries({
+  tags: "TEXT NOT NULL DEFAULT '[]'",
+  availability: "TEXT NOT NULL DEFAULT 'downloadable'",
   editions: "TEXT NOT NULL DEFAULT '{}'",
   source_url: "TEXT",
   license_url: "TEXT",
@@ -73,6 +75,25 @@ if (
       b.publishedYear,
     );
 }
+if (process.env.SHELFCHAT_SKIP_ARCHIVE_IMPORT !== "1") {
+  const discovery = JSON.parse(
+    readFileSync(path.join(root, "cloud", "discovery-books.json"), "utf8"),
+  );
+  const add = db.prepare(
+    "INSERT OR IGNORE INTO books(id,title,author,category,format,size,description,createdAt,url,availability,tags,source_url) VALUES(?,?,?,?,'EPUB',0,'',?,NULL,'discovery',?,?)",
+  );
+  for (const b of discovery)
+    add.run(
+      b.id,
+      b.title,
+      b.author,
+      b.category,
+      new Date().toISOString(),
+      JSON.stringify(b.tags),
+      "https://openlibrary.org/search?q=" +
+        encodeURIComponent(b.title + " " + b.author),
+    );
+}
 const app = express();
 app.disable("x-powered-by");
 if (process.env.TRUST_PROXY)
@@ -82,7 +103,9 @@ app.use(
     contentSecurityPolicy: {
       directives: {
         "script-src": ["'self'"],
-        "connect-src": ["'self'"],
+        "connect-src": ["'self'", "https:", "blob:"],
+        "frame-src": ["'self'", "https:", "blob:"],
+        "style-src": ["'self'", "'unsafe-inline'"],
         "upgrade-insecure-requests":
           process.env.NODE_ENV === "production" ? [] : null,
       },
@@ -148,6 +171,125 @@ function activity(message) {
 app.get("/api/config", (_req, res) =>
   res.json({ transport: "sse", uploads: "local" }),
 );
+function publicBook(b) {
+  if (!b) return null;
+  const { url, file, source_url, license_url, published_year, ...safe } = b;
+  return {
+    ...safe,
+    sourceUrl: source_url,
+    licenseUrl: license_url,
+    publishedYear: published_year,
+    tags: JSON.parse(b.tags),
+    editions: Object.fromEntries(
+      Object.entries(JSON.parse(b.editions)).map(([k, v]) => [
+        k,
+        { size: v.size },
+      ]),
+    ),
+  };
+}
+app.get("/api/catalog", (req, res, next) => {
+  try {
+    const limit = Math.min(48, Math.max(1, Number(req.query.limit) || 24));
+    const sorts = {
+      newest: ["createdAt", "DESC"],
+      title: ["lower(title)", "ASC"],
+      popular: ["downloads", "DESC"],
+    };
+    const [column, direction] = sorts[req.query.sort] || sorts.newest;
+    const clauses = [],
+      params = [];
+    if (req.query.q) {
+      clauses.push("(title LIKE ? OR author LIKE ? OR description LIKE ?)");
+      params.push(
+        ...Array(3).fill("%" + String(req.query.q).slice(0, 160) + "%"),
+      );
+    }
+    if (req.query.category) {
+      clauses.push("category=?");
+      params.push(req.query.category);
+    }
+    if (req.query.format) {
+      clauses.push(
+        "availability='downloadable' AND (format=? OR json_type(editions,?) IS NOT NULL)",
+      );
+      params.push(req.query.format, "$." + req.query.format);
+    }
+    if (req.query.tag) {
+      clauses.push("EXISTS(SELECT 1 FROM json_each(tags) WHERE value=?)");
+      params.push(req.query.tag);
+    }
+    if (req.query.availability === "downloadable")
+      clauses.push("availability='downloadable'");
+    if (req.query.cursor) {
+      const cursor = JSON.parse(Buffer.from(req.query.cursor, "base64url"));
+      if (
+        typeof cursor.id !== "string" ||
+        !["string", "number"].includes(typeof cursor.value)
+      )
+        throw Error("Invalid cursor");
+      clauses.push(`(${column},id) ${direction === "ASC" ? ">" : "<"} (?,?)`);
+      params.push(cursor.value, cursor.id);
+    }
+    const rows = db
+      .prepare(
+        `SELECT *,${column} AS sortValue FROM books ${clauses.length ? "WHERE " + clauses.join(" AND ") : ""} ORDER BY ${column} ${direction},id ${direction} LIMIT ?`,
+      )
+      .all(...params, limit + 1);
+    const last = rows[Math.min(limit, rows.length) - 1];
+    res.json({
+      books: rows.slice(0, limit).map(({ sortValue, ...b }) => publicBook(b)),
+      total: db.prepare("SELECT count(*) AS count FROM books").get().count,
+      nextCursor:
+        rows.length > limit
+          ? Buffer.from(
+              JSON.stringify({ id: last.id, value: last.sortValue }),
+            ).toString("base64url")
+          : null,
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+app.get("/api/books/:id", (req, res) => {
+  const book = publicBook(
+    db.prepare("SELECT * FROM books WHERE id=?").get(req.params.id),
+  );
+  if (!book) return res.status(404).json({ error: "Book not found." });
+  res.json({
+    book,
+    notes: db
+      .prepare(
+        "SELECT * FROM notes WHERE bookId=? ORDER BY createdAt DESC LIMIT 100",
+      )
+      .all(req.params.id),
+  });
+});
+app.get("/api/books/:id/read", writes, (req, res) => {
+  const book = db.prepare("SELECT * FROM books WHERE id=?").get(req.params.id);
+  if (!book || book.availability === "discovery")
+    return res
+      .status(404)
+      .json({ error: "No authorized reading edition is available." });
+  const format = req.query.format || book.format,
+    editions = JSON.parse(book.editions);
+  if (
+    !["EPUB", "PDF"].includes(format) ||
+    (format !== book.format && !editions[format])
+  )
+    return res.status(404).json({ error: "Format not available." });
+  const url = book.file
+    ? `/api/books/${book.id}/content`
+    : editions[format]?.url || book.url;
+  res.json({ url, format, size: editions[format]?.size || book.size });
+});
+app.get("/api/books/:id/content", (req, res) => {
+  const book = db.prepare("SELECT * FROM books WHERE id=?").get(req.params.id);
+  if (!book?.file) return res.status(404).json({ error: "File unavailable." });
+  res.type(book.format === "PDF" ? "application/pdf" : "application/epub+zip");
+  res.set("Content-Disposition", "inline");
+  res.sendFile(path.join(dataDir, "files", book.file));
+});
 app.get("/api/health", (_req, res) => res.json({ ok: true }));
 app.get("/api/snapshot", (_req, res) => res.json(snapshot()));
 app.get("/api/events", (req, res) => {
@@ -252,6 +394,10 @@ app.post("/api/books/:id/notes", writes, (req, res, next) => {
 app.get("/api/books/:id/download", writes, (req, res) => {
   const book = db.prepare("SELECT * FROM books WHERE id=?").get(req.params.id);
   if (!book) return res.status(404).json({ error: "Book not found." });
+  if (book.availability === "discovery")
+    return res
+      .status(404)
+      .json({ error: "No authorized download is available." });
   const edition = req.query.format;
   const variants = JSON.parse(book.editions);
   if (edition && edition !== book.format && !variants[edition])

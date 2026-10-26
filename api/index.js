@@ -4,6 +4,7 @@ import { handleUpload } from "@vercel/blob/client";
 import { database, snapshot, rateLimit } from "../cloud/db.js";
 import { clean, safeUrl, noteInput } from "../server/validation.js";
 import { resolveArchiveDownload } from "../cloud/download-source.js";
+import { catalogPage, PUBLIC_BOOK } from "../cloud/catalog.js";
 const MAX = 25 * 1024 * 1024;
 function json(res, status, body) {
   res.statusCode = status;
@@ -44,6 +45,48 @@ export default async function handler(req, res) {
     if (req.method === "GET" && route === "config")
       return json(res, 200, { transport: "poll", uploads: "blob" });
     const sql = database();
+    if (req.method === "GET" && route === "catalog")
+      return json(res, 200, await catalogPage(sql, url.searchParams));
+    const detail = route.match(/^books\/([^/]+)$/);
+    if (req.method === "GET" && detail) {
+      const [book] = await sql.query(
+        `SELECT ${PUBLIC_BOOK} FROM shelfchat_books WHERE id=$1`,
+        [detail[1]],
+      );
+      if (!book) throw problem("Book not found.", 404);
+      const notes =
+        await sql`SELECT id,book_id AS "bookId",handle,tag,text,created_at AS "createdAt" FROM shelfchat_notes WHERE book_id=${detail[1]} ORDER BY created_at DESC LIMIT 100`;
+      return json(res, 200, { book, notes });
+    }
+    const read = route.match(/^books\/([^/]+)\/read$/);
+    if (req.method === "GET" && read) {
+      await rateLimit(sql, req);
+      const [book] =
+        await sql`SELECT format,url,editions,availability FROM shelfchat_books WHERE id=${read[1]}`;
+      if (!book) throw problem("Book not found.", 404);
+      if (book.availability !== "downloadable")
+        throw problem("No authorized reading edition is available.", 404);
+      const format = url.searchParams.get("format") || book.format;
+      if (
+        !["EPUB", "PDF"].includes(format) ||
+        (format !== book.format && !book.editions[format])
+      )
+        throw problem("Format not available.", 404);
+      const edition = book.editions[format] || { url: book.url };
+      const target = new URL(edition.url);
+      const source =
+        target.hostname === "archive.org" ||
+        target.hostname.endsWith(".archive.org")
+          ? await resolveArchiveDownload(edition, format)
+          : target.href;
+      const inline = new URL(source);
+      inline.searchParams.delete("download");
+      return json(res, 200, {
+        url: inline.href,
+        format,
+        size: edition.size || 0,
+      });
+    }
     if (req.method === "GET" && route === "health") {
       await sql`SELECT 1`;
       return json(res, 200, { ok: true, storage: "neon+blob" });
@@ -207,15 +250,19 @@ export default async function handler(req, res) {
       if (requested && !["PDF", "EPUB"].includes(requested))
         throw problem("Choose PDF or EPUB.");
       const [book] =
-        await sql`SELECT id,title,format,url,editions,source_url FROM shelfchat_books WHERE id=${download[1]}`;
+        await sql`SELECT id,title,format,url,editions,source_url,availability FROM shelfchat_books WHERE id=${download[1]}`;
       if (!book) throw problem("Book not found.", 404);
+      if (book.availability !== "downloadable")
+        throw problem("No authorized download is available.", 404);
       if (requested && requested !== book.format && !book.editions[requested])
         throw problem("Format not available.", 404);
       const kind = requested || book.format;
       const edition = book.editions[kind] || { url: book.url };
-      const destination = book.source_url
-        ? await resolveArchiveDownload(edition, kind)
-        : edition.url;
+      const host = new URL(edition.url).hostname;
+      const destination =
+        host === "archive.org" || host.endsWith(".archive.org")
+          ? await resolveArchiveDownload(edition, kind)
+          : edition.url;
       await sql`WITH updated AS (UPDATE shelfchat_books SET downloads=downloads+1 WHERE id=${book.id} RETURNING title) INSERT INTO shelfchat_activity(message) SELECT 'A reader picked up '||title FROM updated`;
       res.statusCode = 302;
       const target = new URL(destination);

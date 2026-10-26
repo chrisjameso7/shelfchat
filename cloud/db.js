@@ -5,9 +5,6 @@ export function database() {
   return neon(process.env.DATABASE_URL);
 }
 export async function snapshot(sql, visitor, knownVersion) {
-  const [revision] =
-    await sql`SELECT count(*)::text||':'||coalesce(max(created_at)::text,'') AS version FROM shelfchat_books`;
-  const includeBooks = knownVersion !== revision.version;
   const presence =
     visitor &&
     /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
@@ -15,25 +12,14 @@ export async function snapshot(sql, visitor, knownVersion) {
     )
       ? sql`INSERT INTO shelfchat_presence(id) VALUES(${visitor}) ON CONFLICT(id) DO UPDATE SET seen_at=now()`
       : sql`SELECT 1`;
-  const [, books, notes, activity, online, counts] = await sql.transaction([
+  const [, activity, online] = await sql.transaction([
     presence,
-    includeBooks
-      ? sql`SELECT id,title,author,category,format,size::float8 AS size,downloads::float8 AS downloads,description,created_at AS "createdAt",source_url AS "sourceUrl",license_url AS "licenseUrl",published_year AS "publishedYear",(SELECT coalesce(jsonb_object_agg(key,jsonb_build_object('size',value->'size')),'{}'::jsonb) FROM jsonb_each(editions)) AS editions FROM shelfchat_books ORDER BY created_at DESC`
-      : sql`SELECT 1`,
-    sql`SELECT id,book_id AS "bookId",handle,tag,text,created_at AS "createdAt" FROM shelfchat_notes ORDER BY created_at DESC LIMIT 2000`,
     sql`SELECT id::text AS id,message,created_at AS "createdAt" FROM shelfchat_activity ORDER BY created_at DESC LIMIT 12`,
     sql`SELECT count(*)::integer AS count FROM shelfchat_presence WHERE seen_at>now()-interval '45 seconds'`,
-    sql`SELECT id,downloads::float8 AS downloads FROM shelfchat_books WHERE downloads>0`,
   ]);
-  return {
-    ...(includeBooks ? { books } : {}),
-    notes,
-    activity,
-    online: online[0].count,
-    catalogVersion: revision.version,
-    downloads: Object.fromEntries(counts.map((row) => [row.id, row.downloads])),
-  };
+  return { books: [], notes: [], activity, online: online[0].count };
 }
+
 export async function rateLimit(sql, req) {
   const address =
     req.headers["x-vercel-forwarded-for"] ||
