@@ -56,6 +56,7 @@ export default async function handler(req, res) {
         q.length >= 4 &&
         !url.searchParams.get("cursor") &&
         !url.searchParams.get("tag") &&
+        !url.searchParams.get("vibe") &&
         process.env.CATALOG_LOOKUPS_ENABLED !== "0"
       ) {
         const lookup = await claimLookup(sql, q, {

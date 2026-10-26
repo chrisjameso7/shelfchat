@@ -1,3 +1,4 @@
+import { VIBES } from "../../shared/vibes.js";
 import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import {
@@ -37,6 +38,7 @@ export default function Catalog({ onUpload }: { onUpload: () => void }) {
   const [sort, setSort] = useState("newest");
   const [availability, setAvailability] = useState("downloadable");
   const [page, setPage] = useState(1);
+  const [vibe, setVibe] = useState("");
   const [tag, setTag] = useState("");
   const [books, setBooks] = useState<Book[]>([]);
   const [total, setTotal] = useState(0);
@@ -69,6 +71,7 @@ export default function Catalog({ onUpload }: { onUpload: () => void }) {
       if (category !== "All books") params.set("category", category);
       if (format !== "All formats") params.set("format", format);
       if (tag) params.set("tag", tag);
+      if (vibe) params.set("vibe", vibe);
       api<{
         books: Book[];
         total: number;
@@ -98,7 +101,7 @@ export default function Catalog({ onUpload }: { onUpload: () => void }) {
       clearTimeout(retryTimer);
       controller.abort();
     };
-  }, [query, category, format, sort, tag, availability, cursor, refresh]);
+  }, [query, category, format, sort, tag, vibe, availability, cursor, refresh]);
   const visibleBooks = books;
   function changePage(value: number) {
     if (value > page)
@@ -110,23 +113,29 @@ export default function Catalog({ onUpload }: { onUpload: () => void }) {
     <>
       <section className="hero">
         <div className="eyebrow">
-          <span className="tiny-dot" /> INDEPENDENT MINDS. SHARED SHELVES.
+          <span className="tiny-dot" />{" "}
+          {total < 45000
+            ? "OUR NEXT CHAPTER · LIBRARY GOAL"
+            : "INDEPENDENT MINDS. SHARED SHELVES."}
         </div>
         <h1>
-          Less scrolling.
-          <br />
-          More <em>dog-eared pages.</em>
+          Over 45,000+ Free Underground <em>EPUBs &amp; PDFs</em>
         </h1>
         <div className="hero-bottom">
-          <p>
-            A little corner of the internet for books worth getting lost in.
-            <br />
-            Find your next read. Leave a thought in the margins. Stay awhile.
-          </p>
+          <p>Find your book soulmate in the marginalia.</p>
           <a className="hero-link" href="#catalog">
             Find something good <ArrowDown size={17} />
           </a>
         </div>
+        <p className="inventory-note mono" role="status">
+          {loading && !total
+            ? "COUNTING THE SHELVES"
+            : `${total.toLocaleString()} REAL TITLES INDEXED`}{" "}
+          · GROWING TOWARD 75,000
+          {total < 45000 && (
+            <span>45,000+ is our library goal, not the current inventory.</span>
+          )}
+        </p>
         <div className="hero-stamp">
           <BookOpen size={24} />
           <span>
@@ -201,6 +210,26 @@ export default function Catalog({ onUpload }: { onUpload: () => void }) {
             <option value="popular">Most downloaded</option>
             <option value="title">Title A–Z</option>
           </select>
+        </div>
+        <div className="vibe-filters" aria-label="Explore by atmosphere">
+          <span className="eyebrow">PICK YOUR ATMOSPHERE</span>
+          {VIBES.map((item) => (
+            <button
+              key={item.id}
+              aria-pressed={vibe === item.id}
+              className={vibe === item.id ? "selected" : ""}
+              onClick={() => {
+                setVibe(vibe === item.id ? "" : item.id);
+                setPage(1);
+                setCursors([null]);
+              }}
+            >
+              {item.label}
+            </button>
+          ))}
+          <span className="vibe-hint mono">
+            Subject-based shelves. Tap again to clear.
+          </span>
         </div>
         <div className="collection-row">
           <label htmlFor="collection" className="mono">
@@ -283,6 +312,8 @@ export default function Catalog({ onUpload }: { onUpload: () => void }) {
                 setFormat("All formats");
                 setAvailability("downloadable");
                 setTag("");
+                setVibe("");
+                setCursors([null]);
                 setPage(1);
               }}
             >
@@ -391,6 +422,46 @@ export default function Catalog({ onUpload }: { onUpload: () => void }) {
             : "YOU’VE REACHED THE END OF THIS SHELF. THE NEXT ONE IS YOURS TO BUILD."}{" "}
           <ArrowUpRight size={14} />
         </p>
+      </section>
+      <section
+        className="creator-portal"
+        id="contribute"
+        aria-labelledby="creator-heading"
+      >
+        <div>
+          <span className="eyebrow">
+            WRITERS / SMALL PRESSES / INDEPENDENT VOICES
+          </span>
+          <h2 id="creator-heading">
+            The next underground classic
+            <br />
+            <em>could be yours.</em>
+          </h2>
+          <p>
+            Bring your own work to the shelf. Share a PDF or EPUB, introduce
+            your story, and let readers meet you in the margins.
+          </p>
+          <button className="primary" onClick={onUpload}>
+            Submit your work <ArrowUpRight size={16} />
+          </button>
+        </div>
+        <ol className="submission-steps">
+          <li>
+            <span className="mono">01 / INTRODUCE IT</span>
+            <p>Title, author, and a few words about your book.</p>
+          </li>
+          <li>
+            <span className="mono">02 / SHARE THE FILE</span>
+            <p>Upload your PDF or EPUB, or provide a direct file link.</p>
+          </li>
+          <li>
+            <span className="mono">03 / OPEN THE MARGINS</span>
+            <p>
+              Confirm your publishing rights and join the conversation. No
+              signup wall.
+            </p>
+          </li>
+        </ol>
       </section>
     </>
   );

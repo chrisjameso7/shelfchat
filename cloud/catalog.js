@@ -1,3 +1,4 @@
+import { getVibe } from "../shared/vibes.js";
 // Cursor pagination keeps deep shelves independent of OFFSET and library size.
 export const PUBLIC_BOOK = `id,title,author,category,format,size::float8 AS size,downloads::float8 AS downloads,description,created_at AS "createdAt",source_url AS "sourceUrl",cover_url AS "coverUrl",license_url AS "licenseUrl",published_year AS "publishedYear",availability,tags,(SELECT coalesce(jsonb_object_agg(key,jsonb_build_object('size',value->'size')),'{}'::jsonb) FROM jsonb_each(editions)) AS editions`;
 const SORTS = {
@@ -37,7 +38,13 @@ export function catalogQuery(params) {
     where.push(`availability='downloadable'`);
   if (params.get("availability") === "discovery")
     where.push(`availability='discovery'`);
+  const vibe = getVibe(params.get("vibe"));
+  if (vibe)
+    where.push(
+      `(tags @> ARRAY[${bind(vibe.id)}]::text[] OR search_document @@ websearch_to_tsquery('simple',${bind(vibe.terms.join(" OR "))}))`,
+    );
   const signature = JSON.stringify([
+    vibe?.id || null,
     sort,
     q,
     category,

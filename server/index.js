@@ -1,3 +1,4 @@
+import { getVibe } from "../shared/vibes.js";
 import express from "express";
 import helmet from "helmet";
 import { rateLimit } from "express-rate-limit";
@@ -273,6 +274,20 @@ app.get("/api/catalog", (req, res, next) => {
       clauses.push("EXISTS(SELECT 1 FROM json_each(tags) WHERE value=?)");
       params.push(req.query.tag);
     }
+    const vibe = getVibe(req.query.vibe);
+    if (vibe) {
+      clauses.push(
+        "(EXISTS(SELECT 1 FROM json_each(tags) WHERE value=?) OR " +
+          vibe.terms
+            .map(() => "(title LIKE ? OR description LIKE ?)")
+            .join(" OR ") +
+          ")",
+      );
+      params.push(
+        vibe.id,
+        ...vibe.terms.flatMap((term) => ["%" + term + "%", "%" + term + "%"]),
+      );
+    }
     if (req.query.availability === "downloadable")
       clauses.push("availability='downloadable'");
     if (req.query.availability === "discovery")
@@ -298,6 +313,7 @@ app.get("/api/catalog", (req, res, next) => {
       String(req.query.q || "").trim().length >= 4 &&
       !req.query.cursor &&
       !req.query.tag &&
+      !req.query.vibe &&
       process.env.CATALOG_LOOKUPS_ENABLED !== "0"
         ? localLookup(req.query.q)
         : null;

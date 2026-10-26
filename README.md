@@ -89,3 +89,11 @@ See [the two-million-record operations guide](docs/catalog-at-scale.md) for stre
 ## Source ingestion and on-demand search
 
 See [the ingestion and JIT runbook](docs/ingestion-and-jit.md) for the background worker, provider limits, resume checkpoints, durable search cache, readable-first catalog, EPUB streams and storage budgets.
+
+## Editorial discovery and 75,000-book growth target
+
+The four atmosphere chips query the existing full-text and tag indexes. Their subject rules live in `shared/vibes.js`; explicit matching tags also qualify. These are editorial subject associations, not claims about a book's exact mood. Filters compose with search, availability, format and category. Changing atmosphere resets cursor pagination, and filtered misses do not start unrelated external lookups.
+
+The hero labels 45,000+ as a library goal until the measured inventory reaches that threshold. The real database count is displayed separately. The 75,000 figure is a growth target, never a seeded or fabricated inventory.
+
+Run `npm run catalog:grow` on a long-running Node 22 worker with its server-only `DATABASE_URL` configured. This resumes the authorized Gutenberg/Archive harvester, examining up to 75,000 source items in batches of 500, with a 750 MiB database guard. Examined items are not guaranteed to be accepted or unique; only eligible public-domain EPUB/PDF editions are committed. Source availability, rate limits and duplicate books determine the final count. Re-running resumes committed progress; it does not add placeholder records. Do not run this long ingestion inside a deployment build or browser request. Monitor checkpoint accepted/rejected counts and actual Neon storage before raising the target.

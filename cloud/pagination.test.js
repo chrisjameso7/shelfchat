@@ -39,3 +39,34 @@ test("bounded page strips sort internals and produces cursor for next shelf", as
   assert.ok(!("sortValue" in result.books[0]));
   assert.ok(result.nextCursor);
 });
+
+test("vibes use bound indexed subjects and fence pagination across atmospheres", () => {
+  const params = new URLSearchParams({
+    vibe: "rainy-sunday",
+    availability: "downloadable",
+  });
+  const query = catalogQuery(params);
+  assert.match(query.text, /tags @> ARRAY/);
+  assert.match(query.text, /search_document @@ websearch_to_tsquery/);
+  assert.ok(
+    query.values.includes(
+      "romance OR love OR courtship OR domestic OR friendship",
+    ),
+  );
+  params.set(
+    "cursor",
+    Buffer.from(
+      JSON.stringify({
+        signature: query.signature,
+        id: "book",
+        value: "2026-01-01",
+      }),
+    ).toString("base64url"),
+  );
+  params.set("vibe", "deep-lore");
+  assert.throws(() => catalogQuery(params), /Invalid page cursor/);
+  assert.throws(
+    () => catalogQuery(new URLSearchParams({ vibe: "bad-input" })),
+    /Unknown vibe/,
+  );
+});

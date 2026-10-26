@@ -14,7 +14,8 @@
     "db:setup": "node cloud/setup.js",
     "vercel-build": "npm run db:setup && npm run build",
     "catalog:import": "node scripts/import-library.mjs",
-    "catalog:harvest": "node scripts/harvest-library.mjs"
+    "catalog:harvest": "node scripts/harvest-library.mjs",
+    "catalog:grow": "node scripts/harvest-library.mjs --sources gutenberg,archive --max-items 75000 --batch 500 --storage-budget-mb 750 --checkpoint data/catalog-75000.checkpoint.json --resume"
   },
   "dependencies": {
     "@neondatabase/serverless": "1.2.0",
