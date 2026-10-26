@@ -83,8 +83,15 @@ const next = await catalogPage(
   sql,
   new URLSearchParams({ tag: "booktok", limit: "2", cursor: page.nextCursor }),
 );
-const combined = await catalogPage(sql,new URLSearchParams({tag:'booktok',limit:'4'}));
-if(JSON.stringify([...page.books,...next.books].map(b=>b.id))!==JSON.stringify(combined.books.map(b=>b.id)))throw Error('Catalog cursor skipped records with equal timestamps.');
+const combined = await catalogPage(
+  sql,
+  new URLSearchParams({ tag: "booktok", limit: "4" }),
+);
+if (
+  JSON.stringify([...page.books, ...next.books].map((b) => b.id)) !==
+  JSON.stringify(combined.books.map((b) => b.id))
+)
+  throw Error("Catalog cursor skipped records with equal timestamps.");
 if (next.books.some((b) => page.books.some((a) => a.id === b.id)))
   throw Error("Catalog cursor returned duplicate rows.");
 const search = await catalogPage(

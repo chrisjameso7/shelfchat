@@ -65,7 +65,7 @@ export function catalogQuery(params) {
     }
   }
   return {
-    text: `SELECT ${PUBLIC_BOOK},${column === 'created_at' ? 'created_at::text' : column} AS "sortValue" FROM shelfchat_books ${where.length ? "WHERE " + where.join(" AND ") : ""} ORDER BY ${column} ${direction},id ${direction} LIMIT ${bind(limit + 1)}`,
+    text: `SELECT ${PUBLIC_BOOK},${column === "created_at" ? "created_at::text" : column} AS "sortValue" FROM shelfchat_books ${where.length ? "WHERE " + where.join(" AND ") : ""} ORDER BY ${column} ${direction},id ${direction} LIMIT ${bind(limit + 1)}`,
     values,
     limit,
     signature,

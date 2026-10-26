@@ -198,7 +198,7 @@ export default function Catalog({ onUpload }: { onUpload: () => void }) {
             <option value="horror">Horror &amp; the uncanny</option>
           </select>
           <span className="mono">
-            Editorial collections � downloads where authorized
+            Editorial collections - downloads where authorized
           </span>
         </div>
         <div className="filters">
@@ -223,7 +223,7 @@ export default function Catalog({ onUpload }: { onUpload: () => void }) {
             </button>
           ))}
           <span className="mono results">
-            {books.length} shown � {total.toLocaleString()} in the archive
+            {books.length} shown - {total.toLocaleString()} in the archive
           </span>
         </div>
         {error && (
@@ -272,20 +272,24 @@ export default function Catalog({ onUpload }: { onUpload: () => void }) {
                   <p>{b.author}</p>
                   {b.availability === "discovery" && (
                     <p className="mono">
-                      Metadata only � explore legitimate editions
+                      Metadata only - explore legitimate editions
                     </p>
                   )}
                   <div className="book-meta">
                     <span>
-                      {format === "All formats"
-                        ? formats(b).join(" + ")
-                        : format}{" "}
+                      {b.availability === "discovery"
+                        ? "DISCOVERY"
+                        : format === "All formats"
+                          ? formats(b).join(" + ")
+                          : format}{" "}
                       <span className="separator">/</span>{" "}
-                      {fileSize(
-                        format === "All formats"
-                          ? b.size
-                          : editions(b)[format]?.size || b.size,
-                      )}
+                      {b.availability === "discovery"
+                        ? "No file available"
+                        : fileSize(
+                            format === "All formats"
+                              ? b.size
+                              : editions(b)[format]?.size || b.size,
+                          )}
                     </span>
                     <span>
                       <ArrowDownToLine size={12} />
@@ -335,7 +339,7 @@ export default function Catalog({ onUpload }: { onUpload: () => void }) {
               Previous
             </button>
             <span className="mono" role="status">
-              Page {page} � {books.length} titles
+              Page {page} - {books.length} titles
             </span>
             <button
               className="outline"

@@ -4,7 +4,7 @@ export type Book = {
   title: string;
   author: string;
   category: string;
-  format: string;
+  format: string | null;
   size: number;
   downloads: number;
   description: string;

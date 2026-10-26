@@ -129,7 +129,7 @@ export default function Detail({
             {Object.keys(editions(book)).length > 0 && (
               <button
                 className="outline"
-                onClick={() => setReading(Object.keys(editions(book))[0])}
+                onClick={() => setReading(editions(book).PDF ? "PDF" : "EPUB")}
               >
                 <BookOpen size={17} /> Read in Browser
               </button>
@@ -141,7 +141,7 @@ export default function Detail({
                 onChange={(e) => setReading(e.target.value)}
               >
                 <option value="" disabled>
-                  Read another format�
+                  Read another format -
                 </option>
                 {Object.keys(editions(book)).map((kind) => (
                   <option key={kind} value={kind}>
@@ -153,7 +153,7 @@ export default function Detail({
           </div>
           {book.availability === "discovery" && (
             <p className="notice">
-              Discovery entry � No authorized download is currently available.
+              Discovery entry - No authorized download is currently available.
               Explore legitimate editions at the source below.
             </p>
           )}
@@ -179,7 +179,7 @@ export default function Detail({
         </div>
       </div>
       {reading && (
-        <Suspense fallback={<p role="status">Opening reader�</p>}>
+        <Suspense fallback={<p role="status">Opening reader - </p>}>
           <Reader book={book} format={reading} onClose={closeReader} />
         </Suspense>
       )}
