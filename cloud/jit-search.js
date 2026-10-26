@@ -27,6 +27,9 @@ export async function claimLookup(sql, query, { beforeClaim } = {}) {
       retryAfterMs: 1500,
     };
   await beforeClaim?.();
+  const [capacity]=await sql`SELECT pg_database_size(current_database())::float8 AS bytes,(SELECT count(*)::integer FROM shelfchat_search_jobs WHERE status='pending' AND expires_at>now()) AS pending`;
+  const budget=Number(process.env.CATALOG_STORAGE_BUDGET_MB||750)*1_000_000;
+  if(!Number.isFinite(budget)||Number(capacity.bytes)>=budget||capacity.pending>=4)return {key,q,dispatch:false,status:'error',retryAfterMs:5000};
   const token = randomUUID();
   const rows =
     await sql`INSERT INTO shelfchat_search_jobs(key,query,status,token,expires_at) VALUES(${key},${q},'pending',${token},now()+interval '45 seconds') ON CONFLICT(key) DO UPDATE SET status='pending',token=EXCLUDED.token,expires_at=EXCLUDED.expires_at,updated_at=now() WHERE shelfchat_search_jobs.expires_at<now() RETURNING key`;
@@ -49,12 +52,12 @@ export async function claimLookup(sql, query, { beforeClaim } = {}) {
     retryAfterMs: 1500,
   };
 }
-async function sourceSlot(sql, url, signal) {
+export async function sourceSlot(sql, url, signal) {
   const host = new URL(url).hostname;
   const gap = host === "www.gutenberg.org" ? 2000 : 1000;
   while (!signal.aborted) {
     const slot =
-      await sql`INSERT INTO shelfchat_source_limits(source,next_allowed_at) VALUES(${host},now()+${gap}*interval '1 millisecond') ON CONFLICT(source) DO UPDATE SET next_allowed_at=EXCLUDED.next_allowed_at WHERE shelfchat_source_limits.next_allowed_at<=now() RETURNING source`;
+      await sql`INSERT INTO shelfchat_source_limits(source,next_allowed_at) VALUES(${host},now()+${gap}::double precision*interval '1 millisecond') ON CONFLICT(source) DO UPDATE SET next_allowed_at=EXCLUDED.next_allowed_at WHERE shelfchat_source_limits.next_allowed_at<=now() RETURNING source`;
     if (slot.length) return;
     await sleep(400, undefined, { signal });
   }
@@ -89,7 +92,7 @@ export async function resolveOpenTitle(query, { read, signal } = {}) {
       const url = new URL("https://archive.org/advancedsearch.php");
       const literal = query.replace(/["\\]/g, "\\$&");
       url.search = new URLSearchParams({
-        q: `mediatype:texts AND title:"${literal}" AND year:[1500 TO 1929] AND NOT access-restricted-item:true`,
+        q: `mediatype:texts AND title:"${literal}" AND year:[1500 TO 1929] AND licenseurl:("https://creativecommons.org/publicdomain/mark/1.0/" OR "http://creativecommons.org/publicdomain/mark/1.0/" OR "https://creativecommons.org/publicdomain/zero/1.0/" OR "http://creativecommons.org/publicdomain/zero/1.0/") AND NOT access-restricted-item:true`,
         rows: "2",
         output: "json",
         "fl[]": "identifier",
@@ -121,7 +124,8 @@ export async function resolveOpenTitle(query, { read, signal } = {}) {
           books: [...new Map(books.map((b) => [b.id, b])).values()].slice(0, 3),
           incomplete,
         };
-    } catch {
+    } catch(error) {
+      console.warn('ShelfChat source lookup failed:',JSON.stringify({name:error.name,code:error.code,status:error.status}));
       incomplete = true;
     }
   }

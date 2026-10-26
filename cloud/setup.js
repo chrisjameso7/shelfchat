@@ -104,7 +104,9 @@ console.log(
   JSON.stringify(await storageReport(sql)),
 );
 
-const { claimLookup, lookupIdentity } = await import("./jit-search.js");
+const { claimLookup, lookupIdentity,sourceSlot } = await import("./jit-search.js");
+await sourceSlot(sql,'https://www.gutenberg.org/',AbortSignal.timeout(5000));
+console.log('Neon provider request gate verified.');
 const diagnostic = "ShelfChat lookup coordination " + randomUUID();
 try {
   const claims = await Promise.all([
