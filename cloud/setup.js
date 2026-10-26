@@ -1,6 +1,6 @@
+import { randomUUID } from "node:crypto";
 import { readFileSync, existsSync } from "node:fs";
 import { database } from "./db.js";
-import { seed } from "../server/seed.js";
 const sql = database();
 const existing =
   await sql`SELECT tablename FROM pg_tables WHERE schemaname='public'`;
@@ -16,8 +16,6 @@ const statements = readFileSync(
   .map((x) => x.trim())
   .filter(Boolean);
 await sql.transaction(statements.map((text) => sql.query(text, [])));
-for (const [index, b] of seed.entries())
-  await sql`INSERT INTO shelfchat_books(id,title,author,category,format,description,url,created_at) VALUES(${b[0]},${b[1]},${b[2]},${b[3]},'EPUB',${b[6]},${b[5]},${new Date(Date.now() - index * 60000).toISOString()}) ON CONFLICT(id) DO NOTHING`;
 const checks =
   await sql`SELECT tablename,rowsecurity FROM pg_tables WHERE schemaname='public' AND tablename LIKE 'shelfchat_%'`;
 if (checks.some((r) => !r.rowsecurity))
@@ -46,46 +44,36 @@ if (existsSync(archiveFile)) {
   );
 }
 
-const { normalize, insertBatch } = await import(
-  "../scripts/import-library.mjs"
+const retired = JSON.parse(
+  readFileSync(new URL("./editorial-tags.json", import.meta.url), "utf8"),
 );
-const discovery = JSON.parse(
-  readFileSync(new URL("./discovery-books.json", import.meta.url), "utf8"),
-);
-const discoveryRows = discovery.map((b) =>
-  normalize({
-    ...b,
-    availability: "discovery",
-    sourceUrl:
-      "https://openlibrary.org/search?q=" +
-      encodeURIComponent(b.title + " " + b.author),
-  }),
-);
-const batch = insertBatch(discoveryRows);
-await sql.query(batch.text, batch.values);
-console.log(
-  "Editorial discovery collection verified:",
-  discoveryRows.length,
-  "titles (metadata only).",
-);
+for (const b of retired)
+  await sql`DELETE FROM shelfchat_books WHERE id=${b.id} AND availability='discovery' AND source_url=${"https://openlibrary.org/search?q=" + encodeURIComponent(b.title + " " + b.author)}`;
+await sql`DELETE FROM shelfchat_activity a USING shelfchat_notes n WHERE n.book_id='88fcbbbe-971b-43c7-9c88-fb977235d210' AND a.message='@'||n.handle||' left a note in the margins' AND abs(extract(epoch FROM(a.created_at-n.created_at)))<5`;
+await sql`DELETE FROM shelfchat_books WHERE id='88fcbbbe-971b-43c7-9c88-fb977235d210' AND title='A Note from the Reading Room' AND author='ShelfChat'`;
+await sql`DELETE FROM shelfchat_activity WHERE message IN ('A reader added A Note from the Reading Room','A reader picked up A Note from the Reading Room')`;
 const { catalogPage } = await import("./catalog.js");
 const page = await catalogPage(
   sql,
-  new URLSearchParams({ tag: "booktok", limit: "2" }),
+  new URLSearchParams({ availability: "downloadable", limit: "2" }),
 );
 if (
   page.books.length !== 2 ||
   !page.nextCursor ||
-  page.books.some((b) => b.availability !== "discovery")
+  page.books.some((b) => b.availability !== "downloadable")
 )
-  throw Error("Paged discovery catalog verification failed.");
+  throw Error("Readable catalog verification failed.");
 const next = await catalogPage(
   sql,
-  new URLSearchParams({ tag: "booktok", limit: "2", cursor: page.nextCursor }),
+  new URLSearchParams({
+    availability: "downloadable",
+    limit: "2",
+    cursor: page.nextCursor,
+  }),
 );
 const combined = await catalogPage(
   sql,
-  new URLSearchParams({ tag: "booktok", limit: "4" }),
+  new URLSearchParams({ availability: "downloadable", limit: "4" }),
 );
 if (
   JSON.stringify([...page.books, ...next.books].map((b) => b.id)) !==
@@ -96,11 +84,36 @@ if (next.books.some((b) => page.books.some((a) => a.id === b.id)))
   throw Error("Catalog cursor returned duplicate rows.");
 const search = await catalogPage(
   sql,
-  new URLSearchParams({ q: "Fourth Wing" }),
+  new URLSearchParams({
+    q: page.books[0].title
+      .match(/[\p{L}\p{N}]+/gu)
+      .slice(0, 3)
+      .join(" "),
+    availability: "downloadable",
+  }),
 );
-if (!search.books.some((b) => b.id === "discovery-fourth-wing"))
+if (!search.books.some((b) => b.id === page.books[0].id))
   throw Error("Indexed catalog search verification failed.");
 console.log(
-  "Neon search, cursor pagination, discovery availability and catalog count verified:",
+  "Neon search, cursor pagination, readable availability and catalog count verified:",
   page.total,
 );
+const { storageReport } = await import("./storage-report.js");
+console.log(
+  "ShelfChat storage estimate:",
+  JSON.stringify(await storageReport(sql)),
+);
+
+const { claimLookup, lookupIdentity } = await import("./jit-search.js");
+const diagnostic = "ShelfChat lookup coordination " + randomUUID();
+try {
+  const claims = await Promise.all([
+    claimLookup(sql, diagnostic),
+    claimLookup(sql, diagnostic),
+  ]);
+  if (claims.filter((c) => c.dispatch).length !== 1)
+    throw Error("Search lookup claims were not deduplicated.");
+  console.log("Neon lookup lease coalescing verified.");
+} finally {
+  await sql`DELETE FROM shelfchat_search_jobs WHERE key=${lookupIdentity(diagnostic).key}`;
+}

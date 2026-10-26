@@ -8,7 +8,8 @@ import { mkdirSync, readFileSync, unlinkSync, existsSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { clean, safeUrl, noteInput } from "./validation.js";
-import { seed } from "./seed.js";
+import { lookupIdentity, resolveOpenTitle } from "../cloud/jit-search.js";
+import { canStreamSource, streamEpub } from "../cloud/epub-stream.js";
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const dataDir = path.resolve(process.env.DATA_DIR || path.join(root, "data"));
 mkdirSync(path.join(dataDir, "files"), { recursive: true });
@@ -28,25 +29,12 @@ for (const [column, type] of Object.entries({
   availability: "TEXT NOT NULL DEFAULT 'downloadable'",
   editions: "TEXT NOT NULL DEFAULT '{}'",
   source_url: "TEXT",
+  cover_url: "TEXT",
   license_url: "TEXT",
   published_year: "INTEGER",
 }))
   if (!columns.includes(column))
     db.exec(`ALTER TABLE books ADD COLUMN ${column} ${type}`);
-if (!db.prepare("SELECT id FROM books LIMIT 1").get())
-  for (const [index, b] of seed.entries())
-    insert.run(
-      b[0],
-      b[1],
-      b[2],
-      b[3],
-      "EPUB",
-      0,
-      b[6],
-      new Date(Date.now() - index * 60000).toISOString(),
-      b[5],
-      null,
-    );
 const archiveFile = path.join(root, "cloud", "archive-books.json");
 if (
   process.env.SHELFCHAT_SKIP_ARCHIVE_IMPORT !== "1" &&
@@ -75,24 +63,27 @@ if (
       b.publishedYear,
     );
 }
-if (process.env.SHELFCHAT_SKIP_ARCHIVE_IMPORT !== "1") {
-  const discovery = JSON.parse(
-    readFileSync(path.join(root, "cloud", "discovery-books.json"), "utf8"),
+const retired = JSON.parse(
+  readFileSync(path.join(root, "cloud", "editorial-tags.json"), "utf8"),
+);
+for (const b of retired)
+  db.prepare(
+    "DELETE FROM books WHERE id=? AND availability='discovery' AND source_url=?",
+  ).run(
+    b.id,
+    "https://openlibrary.org/search?q=" +
+      encodeURIComponent(b.title + " " + b.author),
   );
-  const add = db.prepare(
-    "INSERT OR IGNORE INTO books(id,title,author,category,format,size,description,createdAt,url,availability,tags,source_url) VALUES(?,?,?,?,'EPUB',0,'',?,NULL,'discovery',?,?)",
+const demo = db
+  .prepare("SELECT id FROM books WHERE id=? AND title=? AND author=?")
+  .get(
+    "88fcbbbe-971b-43c7-9c88-fb977235d210",
+    "A Note from the Reading Room",
+    "ShelfChat",
   );
-  for (const b of discovery)
-    add.run(
-      b.id,
-      b.title,
-      b.author,
-      b.category,
-      new Date().toISOString(),
-      JSON.stringify(b.tags),
-      "https://openlibrary.org/search?q=" +
-        encodeURIComponent(b.title + " " + b.author),
-    );
+if (demo) {
+  db.prepare("DELETE FROM notes WHERE bookId=?").run(demo.id);
+  db.prepare("DELETE FROM books WHERE id=?").run(demo.id);
 }
 const app = express();
 app.disable("x-powered-by");
@@ -177,6 +168,7 @@ function publicBook(b) {
   return {
     ...safe,
     sourceUrl: source_url,
+    coverUrl: b.cover_url,
     licenseUrl: license_url,
     publishedYear: published_year,
     tags: JSON.parse(b.tags),
@@ -187,6 +179,68 @@ function publicBook(b) {
       ]),
     ),
   };
+}
+const localJobs = new Map();
+const lookupAbort = new AbortController();
+let lookingUp = false;
+function localLookup(query) {
+  const { q, key } = lookupIdentity(query);
+  if (q.length < 4) return null;
+  const cached = localJobs.get(key);
+  if (cached?.expires > Date.now())
+    return { status: cached.status, retryAfterMs: 1500 };
+  if (lookingUp) return { status: "pending", retryAfterMs: 1500 };
+  if (localJobs.size >= 250) localJobs.delete(localJobs.keys().next().value);
+  const job = { status: "pending", expires: Date.now() + 45000 };
+  localJobs.set(key, job);
+  lookingUp = true;
+  const signal = AbortSignal.any([
+    lookupAbort.signal,
+    AbortSignal.timeout(20000),
+  ]);
+  void resolveOpenTitle(q, { signal })
+    .then(({ books, incomplete }) => {
+      if (signal.aborted) return;
+      const add = db.prepare(
+        `INSERT INTO books(id,title,author,category,format,size,description,createdAt,url,editions,source_url,license_url,published_year,cover_url,availability,tags) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET title=excluded.title,author=excluded.author,description=excluded.description,url=excluded.url,editions=excluded.editions,source_url=excluded.source_url,license_url=excluded.license_url,cover_url=excluded.cover_url,availability=excluded.availability`,
+      );
+      db.exec("BEGIN");
+      try {
+        for (const b of books)
+          add.run(
+            b.id,
+            b.title,
+            b.author,
+            b.category,
+            b.format,
+            b.size,
+            b.description,
+            new Date().toISOString(),
+            b.url,
+            JSON.stringify(b.editions),
+            b.sourceUrl,
+            b.licenseUrl,
+            b.publishedYear,
+            b.coverUrl || null,
+            b.availability,
+            JSON.stringify(b.tags),
+          );
+        db.exec("COMMIT");
+      } catch (error) {
+        db.exec("ROLLBACK");
+        throw error;
+      }
+      job.status = books.length ? "done" : incomplete ? "error" : "miss";
+      job.expires = Date.now() + (job.status === "error" ? 120000 : 21600000);
+    })
+    .catch(() => {
+      job.status = "error";
+      job.expires = Date.now() + 120000;
+    })
+    .finally(() => {
+      lookingUp = false;
+    });
+  return { status: "pending", retryAfterMs: 1500 };
 }
 app.get("/api/catalog", (req, res, next) => {
   try {
@@ -221,6 +275,8 @@ app.get("/api/catalog", (req, res, next) => {
     }
     if (req.query.availability === "downloadable")
       clauses.push("availability='downloadable'");
+    if (req.query.availability === "discovery")
+      clauses.push("availability='discovery'");
     if (req.query.cursor) {
       const cursor = JSON.parse(Buffer.from(req.query.cursor, "base64url"));
       if (
@@ -237,6 +293,14 @@ app.get("/api/catalog", (req, res, next) => {
       )
       .all(...params, limit + 1);
     const last = rows[Math.min(limit, rows.length) - 1];
+    const lookup =
+      !rows.length &&
+      String(req.query.q || "").trim().length >= 4 &&
+      !req.query.cursor &&
+      !req.query.tag &&
+      process.env.CATALOG_LOOKUPS_ENABLED !== "0"
+        ? localLookup(req.query.q)
+        : null;
     res.json({
       books: rows.slice(0, limit).map(({ sortValue, ...b }) => publicBook(b)),
       total: db.prepare("SELECT count(*) AS count FROM books").get().count,
@@ -246,6 +310,7 @@ app.get("/api/catalog", (req, res, next) => {
               JSON.stringify({ id: last.id, value: last.sortValue }),
             ).toString("base64url")
           : null,
+      ...(lookup ? { lookup } : {}),
     });
   } catch (error) {
     next(error);
@@ -265,6 +330,25 @@ app.get("/api/books/:id", (req, res) => {
       .all(req.params.id),
   });
 });
+app.get("/api/books/:id/stream", writes, async (req, res, next) => {
+  try {
+    const b = db.prepare("SELECT * FROM books WHERE id=?").get(req.params.id);
+    const edition =
+      b &&
+      (JSON.parse(b.editions).EPUB ||
+        (b.format === "EPUB" ? { url: b.url, size: b.size } : null));
+    if (
+      !b ||
+      b.availability !== "downloadable" ||
+      !edition ||
+      !canStreamSource(edition.url)
+    )
+      return res.status(404).json({ error: "Reading edition not found." });
+    await streamEpub(res, edition);
+  } catch (error) {
+    next(error);
+  }
+});
 app.get("/api/books/:id/read", writes, (req, res) => {
   const book = db.prepare("SELECT * FROM books WHERE id=?").get(req.params.id);
   if (!book || book.availability === "discovery")
@@ -281,7 +365,14 @@ app.get("/api/books/:id/read", writes, (req, res) => {
   const url = book.file
     ? `/api/books/${book.id}/content`
     : editions[format]?.url || book.url;
-  res.json({ url, format, size: editions[format]?.size || book.size });
+  res.json({
+    url:
+      format === "EPUB" && canStreamSource(url)
+        ? `/api/books/${book.id}/stream`
+        : url,
+    format,
+    size: editions[format]?.size || book.size,
+  });
 });
 app.get("/api/books/:id/content", (req, res) => {
   const book = db.prepare("SELECT * FROM books WHERE id=?").get(req.params.id);
@@ -447,6 +538,7 @@ const server = app.listen(Number(process.env.PORT) || 3001, "0.0.0.0", () =>
   console.log("ShelfChat API listening on " + (process.env.PORT || 3001)),
 );
 function shutdown() {
+  lookupAbort.abort();
   for (const res of clients) res.end();
   server.close(() => {
     db.close();

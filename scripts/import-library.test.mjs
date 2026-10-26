@@ -53,7 +53,7 @@ test("rights, safe URL and deterministic metadata validation", () => {
 test("parameterized VALUES batches deduplicate IDs and preserve community state", () => {
   const b = normalize({ ...record, title: "Robert'); DROP TABLE books; --" });
   const sql = insertBatch([b, b]);
-  assert.equal(sql.values.length, 14);
+  assert.equal(sql.values.length, 17);
   assert.match(sql.text, /VALUES \(\$1,\$2/);
   assert.ok(!sql.text.includes(b.title));
   assert.ok(!sql.text.includes("downloads="));
@@ -64,7 +64,7 @@ test("parameterized VALUES batches deduplicate IDs and preserve community state"
       normalize({ ...record, id: String(i) }),
     ),
   );
-  assert.equal(batch.values.length, 14000);
+  assert.equal(batch.values.length, 17000);
 });
 test("stream JSON arrays, nested arrays, quoted CSV, gzipped JSONL; resume and reject safely", async () => {
   const dir = await mkdtemp(join(tmpdir(), "shelfchat-import-"));

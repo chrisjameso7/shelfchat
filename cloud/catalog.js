@@ -1,5 +1,5 @@
 // Cursor pagination keeps deep shelves independent of OFFSET and library size.
-export const PUBLIC_BOOK = `id,title,author,category,format,size::float8 AS size,downloads::float8 AS downloads,description,created_at AS "createdAt",source_url AS "sourceUrl",license_url AS "licenseUrl",published_year AS "publishedYear",availability,tags,(SELECT coalesce(jsonb_object_agg(key,jsonb_build_object('size',value->'size')),'{}'::jsonb) FROM jsonb_each(editions)) AS editions`;
+export const PUBLIC_BOOK = `id,title,author,category,format,size::float8 AS size,downloads::float8 AS downloads,description,created_at AS "createdAt",source_url AS "sourceUrl",cover_url AS "coverUrl",license_url AS "licenseUrl",published_year AS "publishedYear",availability,tags,(SELECT coalesce(jsonb_object_agg(key,jsonb_build_object('size',value->'size')),'{}'::jsonb) FROM jsonb_each(editions)) AS editions`;
 const SORTS = {
   newest: ["created_at", "DESC"],
   title: ["lower(title)", "ASC"],
@@ -35,6 +35,8 @@ export function catalogQuery(params) {
     );
   if (params.get("availability") === "downloadable")
     where.push(`availability='downloadable'`);
+  if (params.get("availability") === "discovery")
+    where.push(`availability='discovery'`);
   const signature = JSON.stringify([
     sort,
     q,

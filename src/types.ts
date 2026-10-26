@@ -13,6 +13,7 @@ export type Book = {
   tags?: string[];
   editions?: Record<string, { size: number }>;
   sourceUrl?: string;
+  coverUrl?: string;
   licenseUrl?: string;
   publishedYear?: number;
 };

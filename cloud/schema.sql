@@ -93,3 +93,21 @@ CREATE TRIGGER shelfchat_catalog_delete_count AFTER DELETE ON shelfchat_books RE
 CREATE INDEX IF NOT EXISTS shelfchat_activity_time ON shelfchat_activity(created_at DESC);
 -- statement
 CREATE INDEX IF NOT EXISTS shelfchat_books_available_recent ON shelfchat_books(created_at DESC,id DESC) WHERE availability='downloadable';
+-- statement
+ALTER TABLE shelfchat_books ADD COLUMN IF NOT EXISTS cover_url text;
+-- statement
+ALTER TABLE shelfchat_books ADD COLUMN IF NOT EXISTS rights text CHECK(rights IN ('public-domain','open-license','permission'));
+-- statement
+ALTER TABLE shelfchat_books ADD COLUMN IF NOT EXISTS rights_statement text NOT NULL DEFAULT '' CHECK(length(rights_statement)<=1000);
+-- statement
+ALTER TABLE shelfchat_books ADD COLUMN IF NOT EXISTS last_synced_at timestamptz;
+-- statement
+CREATE TABLE IF NOT EXISTS shelfchat_search_jobs (key text PRIMARY KEY,query text NOT NULL CHECK(length(query) BETWEEN 4 AND 160),status text NOT NULL CHECK(status IN ('pending','done','miss','error')),token uuid NOT NULL,expires_at timestamptz NOT NULL,updated_at timestamptz NOT NULL DEFAULT now());
+-- statement
+CREATE INDEX IF NOT EXISTS shelfchat_search_jobs_expiry ON shelfchat_search_jobs(expires_at);
+-- statement
+ALTER TABLE shelfchat_search_jobs ENABLE ROW LEVEL SECURITY;
+-- statement
+CREATE TABLE IF NOT EXISTS shelfchat_source_limits(source text PRIMARY KEY,next_allowed_at timestamptz NOT NULL);
+-- statement
+ALTER TABLE shelfchat_source_limits ENABLE ROW LEVEL SECURITY;

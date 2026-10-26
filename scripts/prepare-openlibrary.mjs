@@ -62,7 +62,7 @@ if (!db.prepare("SELECT id FROM authors LIMIT 1").get())
 const lookup = db.prepare("SELECT name FROM authors WHERE id=?");
 const curated = JSON.parse(
   readFileSync(
-    new URL("../cloud/discovery-books.json", import.meta.url),
+    new URL("../cloud/editorial-tags.json", import.meta.url),
     "utf8",
   ),
 );

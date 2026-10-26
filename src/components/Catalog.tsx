@@ -35,12 +35,14 @@ export default function Catalog({ onUpload }: { onUpload: () => void }) {
   const [category, setCategory] = useState("All books");
   const [format, setFormat] = useState("All formats");
   const [sort, setSort] = useState("newest");
+  const [availability, setAvailability] = useState("downloadable");
   const [page, setPage] = useState(1);
   const [tag, setTag] = useState("");
   const [books, setBooks] = useState<Book[]>([]);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [lookupStatus, setLookupStatus] = useState<string | null>(null);
   const [cursors, setCursors] = useState<(string | null)[]>([null]);
   const [nextCursor, setNextCursor] = useState<string | null>(null);
   const [refresh, setRefresh] = useState(0);
@@ -58,21 +60,31 @@ export default function Catalog({ onUpload }: { onUpload: () => void }) {
   const cursor = cursors[page - 1] || "";
   useEffect(() => {
     const controller = new AbortController();
+    let retryTimer: number | undefined;
     setLoading(true);
     setError("");
     const timer = setTimeout(() => {
       const params = new URLSearchParams({ q: query, sort, cursor });
+      if (availability) params.set("availability", availability);
       if (category !== "All books") params.set("category", category);
       if (format !== "All formats") params.set("format", format);
       if (tag) params.set("tag", tag);
-      api<{ books: Book[]; total: number; nextCursor: string | null }>(
-        "/catalog?" + params,
-        { signal: controller.signal },
-      )
+      api<{
+        books: Book[];
+        total: number;
+        nextCursor: string | null;
+        lookup?: { status: string; retryAfterMs: number };
+      }>("/catalog?" + params, { signal: controller.signal })
         .then((result) => {
           setBooks(result.books);
           setTotal(result.total);
           setNextCursor(result.nextCursor);
+          setLookupStatus(result.lookup?.status || null);
+          if (result.lookup?.status === "pending")
+            retryTimer = window.setTimeout(
+              () => setRefresh((v) => v + 1),
+              Math.max(1000, result.lookup.retryAfterMs),
+            );
         })
         .catch((e) => {
           if (e.name !== "AbortError") setError(e.message);
@@ -83,9 +95,10 @@ export default function Catalog({ onUpload }: { onUpload: () => void }) {
     }, 250);
     return () => {
       clearTimeout(timer);
+      clearTimeout(retryTimer);
       controller.abort();
     };
-  }, [query, category, format, sort, tag, cursor, refresh]);
+  }, [query, category, format, sort, tag, availability, cursor, refresh]);
   const visibleBooks = books;
   function changePage(value: number) {
     if (value > page)
@@ -137,6 +150,19 @@ export default function Catalog({ onUpload }: { onUpload: () => void }) {
           </button>
         </div>
         <div className="search-row">
+          <select
+            aria-label="Book availability"
+            value={availability}
+            onChange={(e) => {
+              setAvailability(e.target.value);
+              setPage(1);
+              setCursors([null]);
+            }}
+          >
+            <option value="downloadable">Read &amp; download</option>
+            <option value="">All titles</option>
+            <option value="discovery">Discovery only</option>
+          </select>
           <div className="search">
             <Search size={18} />
             <input
@@ -232,21 +258,30 @@ export default function Catalog({ onUpload }: { onUpload: () => void }) {
             <button onClick={() => setRefresh((v) => v + 1)}>Retry</button>
           </p>
         )}
-        {loading ? (
+        {loading || lookupStatus === "pending" ? (
           <p className="empty" role="status">
-            Opening the archive…
+            {lookupStatus === "pending"
+              ? "Checking open catalogs for a reading edition..."
+              : "Opening the archive..."}
           </p>
         ) : !books.length ? (
           <div className="empty">
             <BookOpen />
             <h3>Nothing on this shelf yet.</h3>
-            <p>Try another search, or contribute a book.</p>
+            <p>
+              {lookupStatus === "error"
+                ? "Open catalogs are temporarily unavailable. Please try again shortly."
+                : availability === "downloadable"
+                  ? "Try another search, or choose All titles to include discovery entries."
+                  : "Try another search, or contribute a book."}
+            </p>
             <button
               className="outline"
               onClick={() => {
                 setQuery("");
                 setCategory("All books");
                 setFormat("All formats");
+                setAvailability("downloadable");
                 setTag("");
                 setPage(1);
               }}

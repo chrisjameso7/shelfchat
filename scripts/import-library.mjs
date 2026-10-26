@@ -25,7 +25,8 @@ function text(value, max, name, required = false) {
 }
 function https(value) {
   if (!value) return null;
-  if (typeof value !== 'string' || value.length > 4096) throw Error('URL must be at most 4096 characters');
+  if (typeof value !== "string" || value.length > 4096)
+    throw Error("URL must be at most 4096 characters");
   const u = new URL(value);
   if (
     u.protocol !== "https:" ||
@@ -50,7 +51,18 @@ export function normalize(raw) {
     throw Error("Invalid category");
   const sourceUrl = https(raw.sourceUrl || raw.source_url);
   const licenseUrl = https(raw.licenseUrl || raw.license_url);
+  const coverUrl = https(raw.coverUrl || raw.cover_url);
+  const rightsStatement = text(
+    raw.rightsStatement || raw.rights_statement || "",
+    1000,
+    "rights statement",
+  );
   const availability = raw.availability || "discovery";
+  if (
+    raw.rights &&
+    !["public-domain", "open-license", "permission"].includes(raw.rights)
+  )
+    throw Error("Invalid rights assertion");
   if (!["downloadable", "discovery"].includes(availability))
     throw Error("Invalid availability");
   const variants =
@@ -125,6 +137,9 @@ export function normalize(raw) {
     editions,
     sourceUrl,
     licenseUrl,
+    coverUrl,
+    rights: raw.rights || null,
+    rightsStatement,
     publishedYear: year ? Number(year) : null,
     availability,
     tags: [...new Set(tags)],
@@ -145,6 +160,10 @@ const columns = [
   "published_year",
   "availability",
   "tags",
+  "cover_url",
+  "rights",
+  "rights_statement",
+  "last_synced_at",
 ];
 export function insertBatch(records) {
   // Duplicate IDs in one VALUES statement would trigger PostgreSQL's cardinality violation.
@@ -166,6 +185,9 @@ export function insertBatch(records) {
       b.publishedYear,
       b.availability,
       b.tags,
+      b.coverUrl || null,
+      b.rights || null,
+      b.rightsStatement || "",
     ];
     return (
       "(" +
@@ -175,6 +197,7 @@ export function insertBatch(records) {
           return "$" + values.length;
         })
         .join(",") +
+      ",now()" +
       ")"
     );
   });
@@ -194,6 +217,14 @@ export function insertBatch(records) {
     `tags=ARRAY(SELECT DISTINCT unnest(shelfchat_books.tags||EXCLUDED.tags))`,
   );
   updates.push(`editions=shelfchat_books.editions||EXCLUDED.editions`);
+  updates.push(
+    "cover_url=coalesce(EXCLUDED.cover_url,shelfchat_books.cover_url)",
+  );
+  updates.push("rights=coalesce(EXCLUDED.rights,shelfchat_books.rights)");
+  updates.push(
+    "rights_statement=coalesce(nullif(EXCLUDED.rights_statement,''),shelfchat_books.rights_statement)",
+  );
+  updates.push("last_synced_at=now()");
   for (const c of ["format", "size", "url", "availability"])
     updates.push(
       `${c}=CASE WHEN shelfchat_books.availability='downloadable' AND EXCLUDED.availability='discovery' THEN shelfchat_books.${c} ELSE EXCLUDED.${c} END`,

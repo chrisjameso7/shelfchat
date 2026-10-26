@@ -3,8 +3,11 @@ import { head, getDownloadUrl } from "@vercel/blob";
 import { handleUpload } from "@vercel/blob/client";
 import { database, snapshot, rateLimit } from "../cloud/db.js";
 import { clean, safeUrl, noteInput } from "../server/validation.js";
-import { resolveArchiveDownload } from "../cloud/download-source.js";
+import { resolveEditionDownload } from "../cloud/download-source.js";
 import { catalogPage, PUBLIC_BOOK } from "../cloud/catalog.js";
+import { waitUntil } from "@vercel/functions";
+import { claimLookup, performLookup } from "../cloud/jit-search.js";
+import { canStreamSource, streamEpub } from "../cloud/epub-stream.js";
 const MAX = 25 * 1024 * 1024;
 function json(res, status, body) {
   res.statusCode = status;
@@ -45,8 +48,33 @@ export default async function handler(req, res) {
     if (req.method === "GET" && route === "config")
       return json(res, 200, { transport: "poll", uploads: "blob" });
     const sql = database();
-    if (req.method === "GET" && route === "catalog")
-      return json(res, 200, await catalogPage(sql, url.searchParams));
+    if (req.method === "GET" && route === "catalog") {
+      const result = await catalogPage(sql, url.searchParams);
+      const q = (url.searchParams.get("q") || "").trim();
+      if (
+        !result.books.length &&
+        q.length >= 4 &&
+        !url.searchParams.get("cursor") &&
+        !url.searchParams.get("tag") &&
+        process.env.CATALOG_LOOKUPS_ENABLED !== "0"
+      ) {
+        const lookup = await claimLookup(sql, q, {
+          beforeClaim: () => rateLimit(sql, req),
+        });
+        if (lookup?.dispatch)
+          waitUntil(
+            performLookup(sql, lookup).catch(() =>
+              console.warn("Catalog background lookup failed"),
+            ),
+          );
+        if (lookup)
+          result.lookup = {
+            status: lookup.status,
+            retryAfterMs: lookup.retryAfterMs,
+          };
+      }
+      return json(res, 200, result);
+    }
     const detail = route.match(/^books\/([^/]+)$/);
     if (req.method === "GET" && detail) {
       const [book] = await sql.query(
@@ -57,6 +85,22 @@ export default async function handler(req, res) {
       const notes =
         await sql`SELECT id,book_id AS "bookId",handle,tag,text,created_at AS "createdAt" FROM shelfchat_notes WHERE book_id=${detail[1]} ORDER BY created_at DESC LIMIT 100`;
       return json(res, 200, { book, notes });
+    }
+    const stream = route.match(/^books\/([^/]+)\/stream$/);
+    if (req.method === "GET" && stream) {
+      await rateLimit(sql, req);
+      const [book] =
+        await sql`SELECT format,url,size,editions,availability FROM shelfchat_books WHERE id=${stream[1]}`;
+      if (!book || book.availability !== "downloadable")
+        throw problem("Reading edition not found.", 404);
+      const edition =
+        book.editions.EPUB ||
+        (book.format === "EPUB"
+          ? { url: book.url, size: Number(book.size) }
+          : null);
+      if (!edition || !canStreamSource(edition.url))
+        throw problem("This edition cannot use the reading stream.", 404);
+      return await streamEpub(res, edition);
     }
     const read = route.match(/^books\/([^/]+)\/read$/);
     if (req.method === "GET" && read) {
@@ -73,12 +117,13 @@ export default async function handler(req, res) {
       )
         throw problem("Format not available.", 404);
       const edition = book.editions[format] || { url: book.url };
-      const target = new URL(edition.url);
-      const source =
-        target.hostname === "archive.org" ||
-        target.hostname.endsWith(".archive.org")
-          ? await resolveArchiveDownload(edition, format)
-          : target.href;
+      if (format === "EPUB" && canStreamSource(edition.url))
+        return json(res, 200, {
+          url: `/api/books/${encodeURIComponent(read[1])}/stream`,
+          format,
+          size: edition.size || 0,
+        });
+      const source = await resolveEditionDownload(edition, format);
       const inline = new URL(source);
       inline.searchParams.delete("download");
       return json(res, 200, {
@@ -258,11 +303,7 @@ export default async function handler(req, res) {
         throw problem("Format not available.", 404);
       const kind = requested || book.format;
       const edition = book.editions[kind] || { url: book.url };
-      const host = new URL(edition.url).hostname;
-      const destination =
-        host === "archive.org" || host.endsWith(".archive.org")
-          ? await resolveArchiveDownload(edition, kind)
-          : edition.url;
+      const destination = await resolveEditionDownload(edition, kind);
       await sql`WITH updated AS (UPDATE shelfchat_books SET downloads=downloads+1 WHERE id=${book.id} RETURNING title) INSERT INTO shelfchat_activity(message) SELECT 'A reader picked up '||title FROM updated`;
       res.statusCode = 302;
       const target = new URL(destination);
@@ -276,6 +317,7 @@ export default async function handler(req, res) {
     }
     return json(res, 404, { error: "Endpoint not found." });
   } catch (error) {
+    if (res.destroyed || res.writableEnded) return;
     console.error(
       "ShelfChat API error:",
       error.status ? error.message : "Backend operation failed",

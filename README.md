@@ -23,7 +23,7 @@ Production serves both the SPA and API from port 3001, including direct `/book/:
 
 ## Deploy on Vercel
 
-The GitHub-connected Vercel project is `shelfchat`. `vercel.json` serves the SPA, rewrites `/api/*` to `api/index.js`, and runs `npm run vercel-build`. That build inspects the database, applies the idempotent schema in `cloud/schema.sql`, seeds public-domain books without overwriting existing records, and builds the frontend.
+The GitHub-connected Vercel project is `shelfchat`. `vercel.json` serves the SPA, rewrites `/api/*` to `api/index.js`, and runs `npm run vercel-build`. That build inspects the database, applies the idempotent schema in `cloud/schema.sql`, imports attributable public-domain books without overwriting existing records, and builds the frontend.
 
 Required server environment variables:
 
@@ -62,7 +62,7 @@ Back up the SQLite database using SQLite's backup API (or stop the process and c
 - `src/App.tsx`: catalog search, category/format filters, sorting, book routing, Marginalia and activity.
 - `src/components`: accessible native dialog forms, editable local identity and contributions.
 - `server/index.js`: validated API, upload storage, prepared SQL, download responses, rate limiting, security headers and live SSE snapshots.
-- `server/seed.js`: eight public-domain starter works linking to Project Gutenberg. External sizes are labeled honestly rather than estimated; download counts begin at zero.
+- Catalog data comes from attributable imports, authorized source lookups, or community contributions; no demo books or fabricated counters are generated.
 - `server/*.test.js`: input validation and integration coverage for uploads, downloads, counters, notes and live connections.
 - `.github/workflows/ci.yml`: clean install, tests and production build.
 
@@ -78,10 +78,14 @@ Cloud setup imports this manifest once using stable IDs and `ON CONFLICT DO NOTH
 
 To rebuild the manifest from cached source metadata, run `node scripts/build-archive-import.mjs /path/to/archive-cache 1000`. The cache directory's parent must contain `archive-candidates.json`, ordered by source popularity. The builder rejects restricted items, missing formats, duplicate title/author pairs, missing publication years, and records without the expected public-domain designation. The source discovery uses English texts published no later than 1929 in the `americana`, `toronto`, `library_of_congress`, `cornell`, `smithsonian`, and `cdl` collections, with both PDF and EPUB formats indexed. Metadata requests should identify the client, be cached, limit concurrency, and respect rate limits.
 
-Uploads accept PDF/EPUB up to 25 MB with signature validation, or public HTTPS links. Contributors must affirm sharing rights. Rendered text is escaped by React. This anonymous contribution model intentionally has no account ownership or impersonation protection. Before a public launch at scale, establish moderation/takedown operations, malware scanning and quotas appropriate to your host. File signature checks are not malware scanning. Public-domain status varies by jurisdiction; review the seeded works for your audience. Seeded links depend on the external provider's availability.
+Uploads accept PDF/EPUB up to 25 MB with signature validation, or public HTTPS links. Contributors must affirm sharing rights. Rendered text is escaped by React. This anonymous contribution model intentionally has no account ownership or impersonation protection. Before a public launch at scale, establish moderation/takedown operations, malware scanning and quotas appropriate to your host. File signature checks are not malware scanning. Public-domain status varies by jurisdiction; review source rights for your audience. External links depend on the provider's availability.
 
 Cloud resources are provisioned separately through Vercel Marketplace. The repository does not purchase or configure a custom domain automatically.
 
 ## Large catalogs and browser reader
 
 See [the two-million-record operations guide](docs/catalog-at-scale.md) for streaming JSON/CSV imports, Open Library dump preparation, resumable checkpoints, rights metadata, indexed cursor pagination, database sizing, and EPUB/PDF browser reading. The repository does not bundle two million files; discovery records and downloadable editions are explicitly distinct.
+
+## Source ingestion and on-demand search
+
+See [the ingestion and JIT runbook](docs/ingestion-and-jit.md) for the background worker, provider limits, resume checkpoints, durable search cache, readable-first catalog, EPUB streams and storage budgets.

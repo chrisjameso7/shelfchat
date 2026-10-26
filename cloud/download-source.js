@@ -1,16 +1,9 @@
-export async function resolveArchiveDownload(edition, format, fetcher = fetch) {
+async function resolveCandidates(edition, format, fetcher, allowedHost) {
   const candidates = [edition.url, ...(edition.fallbackUrls || [])];
   for (const candidate of [...new Set(candidates)].slice(0, 3)) {
     try {
       const url = new URL(candidate);
-      if (
-        url.protocol !== "https:" ||
-        !(
-          url.hostname === "archive.org" ||
-          url.hostname.endsWith(".archive.org")
-        )
-      )
-        continue;
+      if (url.protocol !== "https:" || !allowedHost(url.hostname)) continue;
       const response = await fetcher(url.href, {
         headers: {
           Range: "bytes=0-31",
@@ -25,10 +18,7 @@ export async function resolveArchiveDownload(edition, format, fetcher = fetch) {
       const destination = new URL(response.url || url.href);
       if (
         destination.protocol !== "https:" ||
-        !(
-          destination.hostname === "archive.org" ||
-          destination.hostname.endsWith(".archive.org")
-        )
+        !allowedHost(destination.hostname)
       ) {
         await response.body?.cancel();
         continue;
@@ -60,4 +50,19 @@ export async function resolveArchiveDownload(edition, format, fetcher = fetch) {
   );
   error.status = 503;
   throw error;
+}
+
+const archiveHost = (host) =>
+  host === "archive.org" || host.endsWith(".archive.org");
+const gutenbergHost = (host) =>
+  host === "www.gutenberg.org" || host === "gutenberg.org";
+export const resolveArchiveDownload = (edition, format, fetcher = fetch) =>
+  resolveCandidates(edition, format, fetcher, archiveHost);
+export function resolveEditionDownload(edition, format, fetcher = fetch) {
+  const host = new URL(edition.url).hostname;
+  if (archiveHost(host))
+    return resolveCandidates(edition, format, fetcher, archiveHost);
+  if (gutenbergHost(host))
+    return resolveCandidates(edition, format, fetcher, gutenbergHost);
+  return Promise.resolve(edition.url);
 }
