@@ -1,10 +1,16 @@
+class ValidationError extends Error {
+  constructor(message) {
+    super(message);
+    this.status = 400;
+  }
+}
 export function clean(value, min, max, label) {
   if (
     typeof value !== "string" ||
     value.trim().length < min ||
     value.trim().length > max
   )
-    throw new Error(`${label} must be ${min}–${max} characters.`);
+    throw new ValidationError(`${label} must be ${min}–${max} characters.`);
   return value.trim();
 }
 export function safeUrl(value) {
@@ -12,7 +18,7 @@ export function safeUrl(value) {
   try {
     url = new URL(value);
   } catch {
-    throw new Error("Provide a valid HTTPS file link.");
+    throw new ValidationError("Provide a valid HTTPS file link.");
   }
   if (
     url.protocol !== "https:" ||
@@ -24,13 +30,13 @@ export function safeUrl(value) {
     /^\d+\./.test(url.hostname) ||
     !url.hostname.includes(".")
   )
-    throw new Error("Use a public HTTPS file link.");
+    throw new ValidationError("Use a public HTTPS file link.");
   return url.href;
 }
 export function noteInput(body) {
   const handle = clean(body.handle, 2, 24, "Handle");
   if (!/^[\w-]+$/.test(handle))
-    throw new Error(
+    throw new ValidationError(
       "Handle may contain letters, numbers, underscores and hyphens.",
     );
   return {

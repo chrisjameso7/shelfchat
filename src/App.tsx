@@ -9,7 +9,7 @@ import {
   Radio,
   UserRound,
 } from "lucide-react";
-import { api, readIdentity } from "./api";
+import { api, capabilities, readIdentity } from "./api";
 import { IdentityForm, UploadForm } from "./components/Forms";
 import type { Identity, Snapshot } from "./types";
 const initial: Snapshot = { books: [], notes: [], activity: [], online: 0 };
@@ -23,27 +23,75 @@ export default function App() {
   const [connected, setConnected] = useState(false);
   useEffect(() => {
     let active = true;
-    api<Snapshot>("/snapshot")
-      .then((d) => {
-        if (active) setData(d);
+    let stop = () => {};
+    let visitor: string;
+    try {
+      visitor =
+        sessionStorage.getItem("shelfchat.visitor") || crypto.randomUUID();
+      sessionStorage.setItem("shelfchat.visitor", visitor);
+    } catch {
+      visitor = crypto.randomUUID();
+    }
+    let refreshing = false;
+    async function refresh() {
+      if (refreshing || !active) return;
+      refreshing = true;
+      try {
+        const result = await api<Snapshot>(`/snapshot?visitor=${visitor}`);
+        if (active) {
+          setData(result);
+          setError("");
+          setConnected(true);
+        }
+      } catch (e) {
+        if (active) {
+          setError((e as Error).message);
+          setConnected(false);
+        }
+      } finally {
+        refreshing = false;
+      }
+    }
+    window.addEventListener("shelfchat:refresh", refresh);
+    capabilities()
+      .then((config) => {
+        if (!active) return;
+        void refresh();
+        if (config.transport === "poll") {
+          const timer = window.setInterval(() => {
+            if (document.visibilityState === "visible") void refresh();
+          }, 10000);
+          stop = () => clearInterval(timer);
+        } else {
+          const events = new EventSource("/api/events");
+          events.onmessage = (e) => {
+            if (!active) return;
+            try {
+              setData(JSON.parse(e.data));
+              setError("");
+              setConnected(true);
+            } catch {
+              setError("Could not read the live feed.");
+            }
+          };
+          events.onerror = () => {
+            if (active) setConnected(false);
+          };
+          stop = () => events.close();
+        }
       })
       .catch((e) => {
         if (active) setError(e.message);
       });
-    const events = new EventSource("/api/events");
-    events.onmessage = (e) => {
-      try {
-        setData(JSON.parse(e.data));
-        setError("");
-        setConnected(true);
-      } catch {
-        setError("Could not read the live feed.");
-      }
+    const onVisible = () => {
+      if (document.visibilityState === "visible") void refresh();
     };
-    events.onerror = () => setConnected(false);
+    document.addEventListener("visibilitychange", onVisible);
     return () => {
       active = false;
-      events.close();
+      stop();
+      window.removeEventListener("shelfchat:refresh", refresh);
+      document.removeEventListener("visibilitychange", onVisible);
     };
   }, []);
   return (

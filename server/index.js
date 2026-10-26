@@ -96,6 +96,7 @@ function activity(message) {
   );
   broadcast();
 }
+app.get("/api/config", (_req, res) => res.json({ transport: "sse", uploads: "local" }));
 app.get("/api/health", (_req, res) => res.json({ ok: true }));
 app.get("/api/snapshot", (_req, res) => res.json(snapshot()));
 app.get("/api/events", (req, res) => {

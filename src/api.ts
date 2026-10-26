@@ -6,8 +6,16 @@ export async function api<T>(url: string, init?: RequestInit): Promise<T> {
       .catch(() => ({ error: "Request failed. Please try again." }));
     throw new Error(body.error);
   }
-  return response.json();
+  const result = await response.json();
+  if (init?.method && init.method !== "GET")
+    window.dispatchEvent(new Event("shelfchat:refresh"));
+  return result;
 }
+export type Capabilities = {
+  transport: "poll" | "sse";
+  uploads: "blob" | "local";
+};
+export const capabilities = () => api<Capabilities>("/config");
 export function readIdentity() {
   try {
     const value = JSON.parse(

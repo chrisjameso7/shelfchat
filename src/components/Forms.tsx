@@ -1,7 +1,7 @@
 import { useState, type FormEvent } from "react";
 import { Upload, ArrowUpRight } from "lucide-react";
 import { Modal } from "./Modal";
-import { api } from "../api";
+import { api, capabilities } from "../api";
 import type { Identity } from "../types";
 export function IdentityForm({
   identity,
@@ -78,11 +78,51 @@ export function UploadForm({ onClose }: { onClose: () => void }) {
     e.preventDefault();
     setBusy(true);
     setError("");
+    const form = new FormData(e.currentTarget);
     try {
-      await api("/books", {
-        method: "POST",
-        body: new FormData(e.currentTarget),
-      });
+      const config = await capabilities();
+      if (config.uploads === "blob") {
+        const data: Record<string, unknown> = Object.fromEntries(
+          form.entries(),
+        );
+        data.rights = form.get("rights") === "on";
+        const file = form.get("file");
+        delete data.file;
+        if (file instanceof File && file.size) {
+          const intent = await api<{ id: string; pathname: string }>(
+            "/uploads/prepare",
+            {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                filename: file.name,
+                size: file.size,
+                rights: data.rights,
+              }),
+            },
+          );
+          const { upload } = await import("@vercel/blob/client");
+          const blob = await upload(intent.pathname, file, {
+            access: "public",
+            handleUploadUrl: "/api/uploads/token",
+            clientPayload: JSON.stringify({ id: intent.id }),
+            contentType:
+              file.type ||
+              (file.name.toLowerCase().endsWith(".pdf")
+                ? "application/pdf"
+                : "application/epub+zip"),
+          });
+          data.uploadId = intent.id;
+          data.blobUrl = blob.url;
+        }
+        await api("/books", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(data),
+        });
+      } else {
+        await api("/books", { method: "POST", body: form });
+      }
       onClose();
     } catch (e) {
       setError((e as Error).message);
