@@ -31,4 +31,8 @@ export function readIdentity() {
   }
 }
 export const fileSize = (size: number) =>
-  size ? `${(size / 1024 / 1024).toFixed(1)} MB` : "External file";
+  size
+    ? size >= 1048576
+      ? `${(size / 1024 / 1024).toFixed(1)} MB`
+      : `${Math.max(1, Math.round(size / 1024))} KB`
+    : "External file";

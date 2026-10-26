@@ -19,6 +19,18 @@ db.exec(
 const insert = db.prepare(
   "INSERT INTO books(id,title,author,category,format,size,description,createdAt,url,file) VALUES(?,?,?,?,?,?,?,?,?,?)",
 );
+const columns = db
+  .prepare("PRAGMA table_info(books)")
+  .all()
+  .map((c) => c.name);
+for (const [column, type] of Object.entries({
+  editions: "TEXT NOT NULL DEFAULT '{}'",
+  source_url: "TEXT",
+  license_url: "TEXT",
+  published_year: "INTEGER",
+}))
+  if (!columns.includes(column))
+    db.exec(`ALTER TABLE books ADD COLUMN ${column} ${type}`);
 if (!db.prepare("SELECT id FROM books LIMIT 1").get())
   for (const [index, b] of seed.entries())
     insert.run(
@@ -33,6 +45,34 @@ if (!db.prepare("SELECT id FROM books LIMIT 1").get())
       b[5],
       null,
     );
+const archiveFile = path.join(root, "cloud", "archive-books.json");
+if (
+  process.env.SHELFCHAT_SKIP_ARCHIVE_IMPORT !== "1" &&
+  existsSync(archiveFile)
+) {
+  const manifest = JSON.parse(readFileSync(archiveFile, "utf8"));
+  const imported = db.prepare(
+    "INSERT OR IGNORE INTO books(id,title,author,category,format,size,description,createdAt,url,file,editions,source_url,license_url,published_year) VALUES(?,?,?,?,?,?,?,?,?,NULL,?,?,?,?)",
+  );
+  for (const [index, b] of manifest.books.entries())
+    imported.run(
+      b.id,
+      b.title,
+      b.author,
+      b.category,
+      b.format,
+      b.size,
+      b.description,
+      new Date(
+        new Date(manifest.retrievedAt).getTime() - index * 1000,
+      ).toISOString(),
+      b.editions.EPUB.url,
+      JSON.stringify(b.editions),
+      b.sourceUrl,
+      b.licenseUrl,
+      b.publishedYear,
+    );
+}
 const app = express();
 app.disable("x-powered-by");
 if (process.env.TRUST_PROXY)
@@ -70,9 +110,18 @@ const clients = new Set();
 const snapshot = () => ({
   books: db
     .prepare(
-      "SELECT id,title,author,category,format,size,downloads,description,createdAt FROM books ORDER BY createdAt DESC",
+      "SELECT id,title,author,category,format,size,downloads,description,createdAt,editions,source_url AS sourceUrl,license_url AS licenseUrl,published_year AS publishedYear FROM books ORDER BY createdAt DESC",
     )
-    .all(),
+    .all()
+    .map((b) => ({
+      ...b,
+      editions: Object.fromEntries(
+        Object.entries(JSON.parse(b.editions)).map(([kind, value]) => [
+          kind,
+          { size: value.size },
+        ]),
+      ),
+    })),
   notes: db
     .prepare("SELECT * FROM notes ORDER BY createdAt DESC LIMIT 2000")
     .all(),
@@ -96,7 +145,9 @@ function activity(message) {
   );
   broadcast();
 }
-app.get("/api/config", (_req, res) => res.json({ transport: "sse", uploads: "local" }));
+app.get("/api/config", (_req, res) =>
+  res.json({ transport: "sse", uploads: "local" }),
+);
 app.get("/api/health", (_req, res) => res.json({ ok: true }));
 app.get("/api/snapshot", (_req, res) => res.json(snapshot()));
 app.get("/api/events", (req, res) => {
@@ -201,6 +252,10 @@ app.post("/api/books/:id/notes", writes, (req, res, next) => {
 app.get("/api/books/:id/download", writes, (req, res) => {
   const book = db.prepare("SELECT * FROM books WHERE id=?").get(req.params.id);
   if (!book) return res.status(404).json({ error: "Book not found." });
+  const edition = req.query.format;
+  const variants = JSON.parse(book.editions);
+  if (edition && edition !== book.format && !variants[edition])
+    return res.status(404).json({ error: "Format not available." });
   const count = () => {
     db.prepare("UPDATE books SET downloads=downloads+1 WHERE id=?").run(
       book.id,
@@ -221,7 +276,7 @@ app.get("/api/books/:id/download", writes, (req, res) => {
     );
   } else {
     count();
-    res.redirect(302, book.url);
+    res.redirect(302, variants[edition]?.url || book.url);
   }
 });
 app.use("/api", (_req, res) =>
@@ -235,14 +290,12 @@ if (existsSync(path.join(root, "dist"))) {
 }
 app.use((err, _req, res, _next) => {
   console.error(err.message);
-  res
-    .status(err instanceof multer.MulterError ? 413 : 400)
-    .json({
-      error:
-        err.code === "LIMIT_FILE_SIZE"
-          ? "File is too large. Maximum size is 25 MB."
-          : err.message || "Request failed.",
-    });
+  res.status(err instanceof multer.MulterError ? 413 : 400).json({
+    error:
+      err.code === "LIMIT_FILE_SIZE"
+        ? "File is too large. Maximum size is 25 MB."
+        : err.message || "Request failed.",
+  });
 });
 const server = app.listen(Number(process.env.PORT) || 3001, "0.0.0.0", () =>
   console.log("ShelfChat API listening on " + (process.env.PORT || 3001)),

@@ -39,3 +39,11 @@ ALTER TABLE shelfchat_presence ENABLE ROW LEVEL SECURITY;
 ALTER TABLE shelfchat_rate_limits ENABLE ROW LEVEL SECURITY;
 -- statement
 ALTER TABLE shelfchat_uploads ENABLE ROW LEVEL SECURITY;
+-- statement
+ALTER TABLE shelfchat_books ADD COLUMN IF NOT EXISTS editions jsonb NOT NULL DEFAULT '{}'::jsonb;
+-- statement
+ALTER TABLE shelfchat_books ADD COLUMN IF NOT EXISTS source_url text;
+-- statement
+ALTER TABLE shelfchat_books ADD COLUMN IF NOT EXISTS license_url text;
+-- statement
+ALTER TABLE shelfchat_books ADD COLUMN IF NOT EXISTS published_year integer;

@@ -8,7 +8,12 @@ test("shared catalog, uploads, marginalia, downloads and live feed", async () =>
   const directory = mkdtempSync(path.join(tmpdir(), "shelfchat-test-"));
   const port = 32000 + Math.floor(Math.random() * 10000);
   const child = spawn(process.execPath, ["server/index.js"], {
-    env: { ...process.env, PORT: String(port), DATA_DIR: directory },
+    env: {
+      ...process.env,
+      PORT: String(port),
+      DATA_DIR: directory,
+      SHELFCHAT_SKIP_ARCHIVE_IMPORT: "1",
+    },
     stdio: ["ignore", "pipe", "pipe"],
   });
   try {

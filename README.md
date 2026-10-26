@@ -68,6 +68,16 @@ Back up the SQLite database using SQLite's backup API (or stop the process and c
 
 API: `GET /api/snapshot`, `GET /api/events`, `GET /api/health`, `POST /api/books` (multipart), `POST /api/books/:id/notes` (JSON), `GET /api/books/:id/download`.
 
+## Public-domain catalog import
+
+`cloud/archive-books.json` contains 1,000 distinct historical book records sourced from institutional collections at Internet Archive. Each record includes a source page, an explicit Creative Commons public-domain designation, publication year, and PDF and EPUB file URLs, sizes and source checksums. The EPUBs are OCR-derived and their typography can vary. Files remain hosted by Internet Archive, and download availability depends on that service.
+
+The catalog displays 24 books per page; search and format/category filters cover the entire collection. A single book page offers each available format separately. `GET /api/books/:id/download?format=PDF` or `?format=EPUB` selects the file while retaining the book's shared download counter and Marginalia. The cloud API checks the source's file signature and can try two alternate Archive hosts before redirecting, so a broken source host does not immediately lead to a dead link. If all copies are unavailable, it returns a temporary-unavailability error without incrementing the counter.
+
+Cloud setup imports this manifest once using stable IDs and `ON CONFLICT DO NOTHING`, verifies all 1,000 records have both formats, and preserves existing contributions, notes and download counters. Subsequent cloud refreshes send only activity and counters when the catalog version is unchanged, avoiding repeated transfers of the full library. The standalone SQLite server imports the same manifest automatically; integration tests set `SHELFCHAT_SKIP_ARCHIVE_IMPORT=1` to keep their isolated fixtures small.
+
+To rebuild the manifest from cached source metadata, run `node scripts/build-archive-import.mjs /path/to/archive-cache 1000`. The cache directory's parent must contain `archive-candidates.json`, ordered by source popularity. The builder rejects restricted items, missing formats, duplicate title/author pairs, missing publication years, and records without the expected public-domain designation. The source discovery uses English texts published no later than 1929 in the `americana`, `toronto`, `library_of_congress`, `cornell`, `smithsonian`, and `cdl` collections, with both PDF and EPUB formats indexed. Metadata requests should identify the client, be cached, limit concurrency, and respect rate limits.
+
 Uploads accept PDF/EPUB up to 25 MB with signature validation, or public HTTPS links. Contributors must affirm sharing rights. Rendered text is escaped by React. This anonymous contribution model intentionally has no account ownership or impersonation protection. Before a public launch at scale, establish moderation/takedown operations, malware scanning and quotas appropriate to your host. File signature checks are not malware scanning. Public-domain status varies by jurisdiction; review the seeded works for your audience. Seeded links depend on the external provider's availability.
 
 Cloud resources are provisioned separately through Vercel Marketplace. The repository does not purchase or configure a custom domain automatically.

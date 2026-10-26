@@ -4,6 +4,7 @@ import { ArrowDownToLine, ArrowUpRight, ArrowLeft } from "lucide-react";
 import { api, fileSize } from "../api";
 import type { Snapshot, Identity } from "../types";
 import { Cover } from "./Cover";
+import { editions } from "../books";
 export default function Detail({
   data,
   identity,
@@ -64,13 +65,37 @@ export default function Detail({
               "A new addition to our shared shelf. Open a page and see where it takes you."}
           </p>
           <p className="mono">
-            {book.format} · {fileSize(book.size)} ·{" "}
             {book.downloads.toLocaleString()} downloads
+            {book.publishedYear ? ` · Published ${book.publishedYear}` : ""}
           </p>
-          <a className="primary" href={`/api/books/${book.id}/download`}>
-            Download {book.format}
-            <ArrowDownToLine size={17} />
-          </a>
+          <div className="edition-actions">
+            {Object.entries(editions(book)).map(([kind, file]) => (
+              <a
+                key={kind}
+                className="primary"
+                href={`/api/books/${book.id}/download?format=${kind}`}
+              >
+                Download {kind} · {fileSize(file.size)}
+                <ArrowDownToLine size={17} />
+              </a>
+            ))}
+          </div>
+          {book.sourceUrl && (
+            <p className="source-credit">
+              <a href={book.sourceUrl} target="_blank" rel="noreferrer">
+                View source at Internet Archive ↗
+              </a>
+              {book.licenseUrl && (
+                <>
+                  {" "}
+                  ·{" "}
+                  <a href={book.licenseUrl} target="_blank" rel="noreferrer">
+                    Public-domain designation ↗
+                  </a>
+                </>
+              )}
+            </p>
+          )}
         </div>
       </div>
       <div className="marginalia">

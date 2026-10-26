@@ -1,4 +1,81 @@
 @import "tailwindcss";
+.book-card .book-info h3 {
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.book-card .book-info > p {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.cover-title {
+  display: -webkit-box;
+  -webkit-line-clamp: 5;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.detail h1 {
+  overflow-wrap: anywhere;
+}
+.format-downloads {
+  display: flex;
+  flex: 1;
+  gap: 14px;
+}
+.format-downloads .download {
+  justify-content: flex-start;
+  gap: 6px;
+}
+.edition-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+.source-credit a {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.pagination {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  margin-top: 30px;
+}
+.pagination .mono {
+  font-size: 11px;
+  color: #aaa;
+}
+.pagination button:disabled {
+  cursor: default;
+}
+.book-card .book-info h3 {
+  overflow-wrap: anywhere;
+}
+.book-card .book-info > p {
+  overflow-wrap: anywhere;
+}
+@media (max-width: 720px) {
+  .pagination {
+    flex-wrap: wrap;
+  }
+  .pagination .mono {
+    font-size: 9px;
+  }
+  .format-downloads {
+    gap: 8px;
+  }
+  .format-downloads .download {
+    font-size: 9px;
+    gap: 4px;
+  }
+  .edition-actions .primary {
+    width: 100%;
+  }
+}
 @theme {
   --color-paper: #e9e6df;
   --color-ink: #0a0a0a;

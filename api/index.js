@@ -3,6 +3,7 @@ import { head, getDownloadUrl } from "@vercel/blob";
 import { handleUpload } from "@vercel/blob/client";
 import { database, snapshot, rateLimit } from "../cloud/db.js";
 import { clean, safeUrl, noteInput } from "../server/validation.js";
+import { resolveArchiveDownload } from "../cloud/download-source.js";
 const MAX = 25 * 1024 * 1024;
 function json(res, status, body) {
   res.statusCode = status;
@@ -51,7 +52,11 @@ export default async function handler(req, res) {
       return json(
         res,
         200,
-        await snapshot(sql, url.searchParams.get("visitor")),
+        await snapshot(
+          sql,
+          url.searchParams.get("visitor"),
+          url.searchParams.get("catalogVersion"),
+        ),
       );
     if (req.method === "POST" && route === "uploads/token") {
       const b = await body(req);
@@ -198,12 +203,28 @@ export default async function handler(req, res) {
     const download = route.match(/^books\/([^/]+)\/download$/);
     if (req.method === "GET" && download) {
       await rateLimit(sql, req);
-      const rows =
-        await sql`WITH updated AS (UPDATE shelfchat_books SET downloads=downloads+1 WHERE id=${download[1]} RETURNING title,url),event AS (INSERT INTO shelfchat_activity(message) SELECT 'A reader picked up '||title FROM updated) SELECT url FROM updated`;
-      if (!rows.length) throw problem("Book not found.", 404);
+      const requested = url.searchParams.get("format");
+      if (requested && !["PDF", "EPUB"].includes(requested))
+        throw problem("Choose PDF or EPUB.");
+      const [book] =
+        await sql`SELECT id,title,format,url,editions,source_url FROM shelfchat_books WHERE id=${download[1]}`;
+      if (!book) throw problem("Book not found.", 404);
+      if (requested && requested !== book.format && !book.editions[requested])
+        throw problem("Format not available.", 404);
+      const kind = requested || book.format;
+      const edition = book.editions[kind] || { url: book.url };
+      const destination = book.source_url
+        ? await resolveArchiveDownload(edition, kind)
+        : edition.url;
+      await sql`WITH updated AS (UPDATE shelfchat_books SET downloads=downloads+1 WHERE id=${book.id} RETURNING title) INSERT INTO shelfchat_activity(message) SELECT 'A reader picked up '||title FROM updated`;
       res.statusCode = 302;
-      const target = new URL(rows[0].url);
-      res.setHeader("Location", target.hostname === process.env.BLOB_STORE_HOSTNAME ? getDownloadUrl(target.href) : target.href);
+      const target = new URL(destination);
+      res.setHeader(
+        "Location",
+        target.hostname === process.env.BLOB_STORE_HOSTNAME
+          ? getDownloadUrl(target.href)
+          : target.href,
+      );
       return res.end();
     }
     return json(res, 404, { error: "Endpoint not found." });

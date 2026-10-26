@@ -11,7 +11,7 @@ import {
 } from "lucide-react";
 import { api, capabilities, readIdentity } from "./api";
 import { IdentityForm, UploadForm } from "./components/Forms";
-import type { Identity, Snapshot } from "./types";
+import type { Identity, Snapshot, SnapshotDelta } from "./types";
 const initial: Snapshot = { books: [], notes: [], activity: [], online: 0 };
 export default function App() {
   const [data, setData] = useState(initial);
@@ -33,13 +33,24 @@ export default function App() {
       visitor = crypto.randomUUID();
     }
     let refreshing = false;
+    let catalogVersion = "";
     async function refresh() {
       if (refreshing || !active) return;
       refreshing = true;
       try {
-        const result = await api<Snapshot>(`/snapshot?visitor=${visitor}`);
+        const result = await api<SnapshotDelta>(
+          `/snapshot?visitor=${visitor}&catalogVersion=${encodeURIComponent(catalogVersion)}`,
+        );
         if (active) {
-          setData(result);
+          catalogVersion = result.catalogVersion || "";
+          setData((previous) => ({
+            ...previous,
+            ...result,
+            books: (result.books || previous.books).map((book) => ({
+              ...book,
+              downloads: result.downloads?.[book.id] ?? book.downloads,
+            })),
+          }));
           setError("");
           setConnected(true);
         }

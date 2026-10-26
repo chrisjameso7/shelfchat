@@ -9,6 +9,10 @@ export type Book = {
   downloads: number;
   description: string;
   createdAt: string;
+  editions?: Record<string, { size: number }>;
+  sourceUrl?: string;
+  licenseUrl?: string;
+  publishedYear?: number;
 };
 export type Note = {
   id: string;
@@ -24,4 +28,9 @@ export type Snapshot = {
   notes: Note[];
   activity: Activity[];
   online: number;
+};
+export type SnapshotDelta = Omit<Snapshot, "books"> & {
+  books?: Book[];
+  catalogVersion?: string;
+  downloads?: Record<string, number>;
 };

@@ -12,6 +12,7 @@ import {
 import { fileSize } from "../api";
 import type { Snapshot } from "../types";
 import { Cover } from "./Cover";
+import { editions, formats } from "../books";
 export default function Catalog({
   data,
   loading,
@@ -42,11 +43,12 @@ export default function Catalog({
   const [category, setCategory] = useState("All books");
   const [format, setFormat] = useState("All formats");
   const [sort, setSort] = useState("newest");
+  const [page, setPage] = useState(1);
   const books = data.books
     .filter(
       (b) =>
         (category === "All books" || b.category === category) &&
-        (format === "All formats" || b.format === format) &&
+        (format === "All formats" || formats(b).includes(format)) &&
         `${b.title} ${b.author}`.toLowerCase().includes(query.toLowerCase()),
     )
     .sort((a, b) =>
@@ -56,6 +58,17 @@ export default function Catalog({
           ? a.title.localeCompare(b.title)
           : b.createdAt.localeCompare(a.createdAt),
     );
+  const pageSize = 24;
+  const pageCount = Math.max(1, Math.ceil(books.length / pageSize));
+  const activePage = Math.min(page, pageCount);
+  const visibleBooks = books.slice(
+    (activePage - 1) * pageSize,
+    activePage * pageSize,
+  );
+  function changePage(value: number) {
+    setPage(value);
+    document.getElementById("catalog")?.scrollIntoView({ behavior: "smooth" });
+  }
   return (
     <>
       <section className="hero">
@@ -106,7 +119,10 @@ export default function Catalog({
               ref={searchRef}
               aria-label="Search books or authors"
               value={query}
-              onChange={(e) => setQuery(e.target.value)}
+              onChange={(e) => {
+                setQuery(e.target.value);
+                setPage(1);
+              }}
               placeholder="A title, an author, a new obsession…"
             />
             <kbd>/</kbd>
@@ -114,7 +130,10 @@ export default function Catalog({
           <select
             aria-label="Filter by format"
             value={format}
-            onChange={(e) => setFormat(e.target.value)}
+            onChange={(e) => {
+              setFormat(e.target.value);
+              setPage(1);
+            }}
           >
             <option>All formats</option>
             <option>EPUB</option>
@@ -123,7 +142,10 @@ export default function Catalog({
           <select
             aria-label="Sort books"
             value={sort}
-            onChange={(e) => setSort(e.target.value)}
+            onChange={(e) => {
+              setSort(e.target.value);
+              setPage(1);
+            }}
           >
             <option value="newest">Recently added</option>
             <option value="popular">Most downloaded</option>
@@ -143,7 +165,10 @@ export default function Catalog({
               key={c}
               aria-pressed={category === c}
               className={category === c ? "selected" : ""}
-              onClick={() => setCategory(c)}
+              onClick={() => {
+                setCategory(c);
+                setPage(1);
+              }}
             >
               {c}
             </button>
@@ -167,6 +192,7 @@ export default function Catalog({
                 setQuery("");
                 setCategory("All books");
                 setFormat("All formats");
+                setPage(1);
               }}
             >
               Clear filters
@@ -174,22 +200,29 @@ export default function Catalog({
           </div>
         ) : (
           <div className="book-grid">
-            {books.map((b, i) => (
+            {visibleBooks.map((b, i) => (
               <article className="book-card" key={b.id}>
                 <Link className="cover-link" to={`/book/${b.id}`}>
                   <Cover book={b} index={i} />
-                  <span className="cover-label">{b.format}</span>
+                  <span className="cover-label">{formats(b).join(" / ")}</span>
                 </Link>
                 <div className="book-info">
                   <span className="eyebrow category">{b.category}</span>
                   <Link to={`/book/${b.id}`}>
-                    <h3>{b.title}</h3>
+                    <h3 title={b.title}>{b.title}</h3>
                   </Link>
                   <p>{b.author}</p>
                   <div className="book-meta">
                     <span>
-                      {b.format} <span className="separator">/</span>{" "}
-                      {fileSize(b.size)}
+                      {format === "All formats"
+                        ? formats(b).join(" + ")
+                        : format}{" "}
+                      <span className="separator">/</span>{" "}
+                      {fileSize(
+                        format === "All formats"
+                          ? b.size
+                          : editions(b)[format]?.size || b.size,
+                      )}
                     </span>
                     <span>
                       <ArrowDownToLine size={12} />
@@ -197,12 +230,19 @@ export default function Catalog({
                     </span>
                   </div>
                   <div className="card-actions">
-                    <a
-                      href={`/api/books/${b.id}/download`}
-                      className="download"
-                    >
-                      Download <ArrowDownToLine size={14} />
-                    </a>
+                    <div className="format-downloads">
+                      {formats(b).map((kind) => (
+                        <a
+                          key={kind}
+                          href={`/api/books/${b.id}/download?format=${kind}`}
+                          className="download"
+                          aria-label={`Download ${b.title} as ${kind}`}
+                        >
+                          {kind}
+                          <ArrowDownToLine size={13} />
+                        </a>
+                      ))}
+                    </div>
                     <Link
                       className="notes-link"
                       aria-label={`Read marginalia for ${b.title}`}
@@ -217,8 +257,33 @@ export default function Catalog({
             ))}
           </div>
         )}
+        {books.length > pageSize && (
+          <div className="pagination" aria-label="Catalog pagination">
+            <button
+              className="outline"
+              disabled={activePage === 1}
+              onClick={() => changePage(activePage - 1)}
+            >
+              Previous
+            </button>
+            <span className="mono" role="status">
+              {(activePage - 1) * pageSize + 1}–
+              {Math.min(activePage * pageSize, books.length)} of{" "}
+              {books.length.toLocaleString()} · Page {activePage} of {pageCount}
+            </span>
+            <button
+              className="outline"
+              disabled={activePage === pageCount}
+              onClick={() => changePage(activePage + 1)}
+            >
+              Next
+            </button>
+          </div>
+        )}
         <p className="shelf-end">
-          YOU’VE REACHED THE END OF THIS SHELF. THE NEXT ONE IS YOURS TO BUILD.{" "}
+          {activePage < pageCount
+            ? "THERE’S MORE ON THE NEXT SHELF. KEEP EXPLORING."
+            : "YOU’VE REACHED THE END OF THIS SHELF. THE NEXT ONE IS YOURS TO BUILD."}{" "}
           <ArrowUpRight size={14} />
         </p>
       </section>
