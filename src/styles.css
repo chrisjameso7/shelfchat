@@ -1327,3 +1327,211 @@ dialog:not(.reader-dialog),
     width: 100%;
   }
 }
+/* Chromatic reading club: color in the margins, quiet behind the text. */
+:root {
+  --violet: #b29aff;
+  --mint: #8de3cc;
+  --rose: #f6a6bc;
+  --amber: #f3ca80;
+}
+.brand-dot {
+  color: var(--violet);
+}
+header {
+  border-image: linear-gradient(
+      90deg,
+      #8b5cf600,
+      #8b5cf666,
+      #fb718544,
+      #fbbf2400
+    )
+    1;
+}
+.hero {
+  isolation: isolate;
+  overflow: hidden;
+}
+.hero::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background:
+    radial-gradient(ellipse at 82% 30%, #6d28d920, transparent 55%),
+    radial-gradient(ellipse at 35% 100%, #1d4ed810, transparent 60%);
+}
+.hero h1 em {
+  color: #bda7f4;
+  background: linear-gradient(100deg, #bba2ff 10%, #e7a6d1 65%, #f2bf8e);
+  background-clip: text;
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+.hero .eyebrow {
+  color: #c0ace7;
+}
+.hero .hero-bottom p {
+  font-family: Georgia, serif;
+  font-size: 21px;
+  color: #c6bdd3;
+}
+.hero-link {
+  border-color: #8f73c9;
+  color: #d8c9fa;
+}
+.hero-stamp {
+  border-color: #9374bd66;
+  color: #c5a8f0;
+  background: #a78bfa06;
+}
+.hero-stamp svg {
+  color: #d5bbff;
+}
+.primary {
+  background: #bca4f5;
+  border-color: #bca4f5;
+  color: #160f24;
+}
+.primary:hover {
+  background: #d1baff;
+  border-color: #d1baff;
+}
+.outline:hover {
+  border-color: #a88cda;
+  color: #e3d4ff;
+  background: #a78bfa0a;
+}
+.eyebrow.category {
+  color: var(--mint);
+}
+.book-card:nth-child(3n + 2) .eyebrow.category {
+  color: var(--rose);
+}
+.book-card:nth-child(3n) .eyebrow.category {
+  color: var(--amber);
+}
+.book-card:hover {
+  border-color: #a287d0;
+  box-shadow:
+    0 8px 32px #0006,
+    0 0 22px #8b5cf615;
+}
+.cover {
+  background: #ccb9ef;
+  color: #231c39;
+  box-shadow: inset 6px 0 0 #0002;
+}
+.cover-1 {
+  background: #87b3de;
+  color: #132c48;
+}
+.cover-2 {
+  background: #df927f;
+  color: #3f211f;
+}
+.cover-3 {
+  background: #bad086;
+  color: #293718;
+}
+.cover-4 {
+  background: #88c7ba;
+  color: #183c37;
+}
+.cover-5 {
+  background: #e0b77c;
+  color: #44301b;
+}
+.cover-art {
+  opacity: 0.8;
+}
+.cover-label {
+  color: #e0d2ff;
+  border-color: #bda3ed66;
+  background: #150e22ee;
+}
+.download:hover,
+.notes-link:hover {
+  color: #ceb5ff;
+}
+.vibe-filters button:nth-of-type(1) {
+  --mood: #efba79;
+  --mood-bg: #efba7910;
+}
+.vibe-filters button:nth-of-type(2) {
+  --mood: #8eacff;
+  --mood-bg: #8eacff10;
+}
+.vibe-filters button:nth-of-type(3) {
+  --mood: #cc9aff;
+  --mood-bg: #cc9aff10;
+}
+.vibe-filters button:nth-of-type(4) {
+  --mood: #e8a1b9;
+  --mood-bg: #e8a1b910;
+}
+.vibe-filters button {
+  border-color: color-mix(in srgb, var(--mood) 30%, #222);
+  color: var(--mood);
+  background: var(--mood-bg);
+}
+.vibe-filters button:hover,
+.vibe-filters button.selected {
+  border-color: var(--mood);
+  color: var(--mood);
+  background: color-mix(in srgb, var(--mood) 16%, #0a0a0a);
+  box-shadow: 0 0 20px var(--mood-bg);
+}
+.creator-portal {
+  border-top: 2px solid #a78bfa;
+  background:
+    radial-gradient(ellipse at 100% 100%, #5b21b619, transparent 70%), #0d0c10;
+}
+.creator-portal h2 em {
+  color: var(--rose);
+}
+.submission-steps li:nth-child(2) .mono {
+  color: var(--mint);
+}
+.submission-steps li:nth-child(3) .mono {
+  color: var(--amber);
+}
+.detail-grid {
+  padding-top: 25px;
+  border-top: 2px solid #aa8cda;
+}
+.detail .author {
+  color: var(--rose);
+}
+.detail .source-credit a {
+  color: #b6a1d3;
+}
+.marginalia h2 {
+  color: #e4d4ff;
+}
+.tag {
+  color: #c8b3ec;
+  border-color: #8b5cf64d;
+  background: #8b5cf60a;
+}
+.activity svg {
+  color: var(--mint);
+}
+.activity > div:nth-child(2n) svg {
+  color: var(--rose);
+}
+button:focus-visible,
+a:focus-visible,
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible {
+  outline-color: #c5a9ff;
+}
+@media (max-width: 720px) {
+  .hero .hero-bottom p {
+    font-size: 18px;
+  }
+  .detail-grid {
+    padding-top: 20px;
+  }
+}

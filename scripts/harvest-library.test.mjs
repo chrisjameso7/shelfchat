@@ -151,3 +151,50 @@ test("multi-source sync commits batches, resumes, and never advances past a fail
     await rm(dir, { recursive: true, force: true });
   }
 });
+
+test("remote commit failures never advance checkpoints; retries are idempotent", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "shelfchat-remote-"));
+  const checkpoint = join(dir, "state.checkpoint.json");
+  const options = {
+    endpoint: "https://shelfchat.vercel.app/api/admin/import",
+    sources: "gutenberg",
+    batch: 1,
+    "max-items": 1,
+    checkpoint,
+  };
+  const read = async (url) => (url.includes("search.opds") ? list : opds);
+  try {
+    await assert.rejects(
+      harvest(options, {
+        read,
+        commit: async () => {
+          throw Error("remote offline");
+        },
+      }),
+      /committed item 0/,
+    );
+    assert.equal(existsSync(checkpoint), false);
+    let committed = [];
+    await harvest(options, {
+      read,
+      commit: async (books) => {
+        committed = books;
+      },
+    });
+    assert.equal(committed[0].id, "pg-155");
+    assert.equal(JSON.parse(await readFile(checkpoint, "utf8")).accepted, 1);
+    let repeated = 0;
+    await harvest(
+      { ...options, resume: true },
+      {
+        read,
+        commit: async () => {
+          repeated++;
+        },
+      },
+    );
+    assert.equal(repeated, 0);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});

@@ -374,7 +374,7 @@ export function createSourceClient({
 
 export async function harvest(
   options,
-  { sql: providedSql, read: providedRead, signal } = {},
+  { sql: providedSql, read: providedRead, commit: providedCommit, signal } = {},
 ) {
   const sources = String(options.sources || "gutenberg,archive").split(",");
   if (
@@ -401,7 +401,7 @@ export async function harvest(
   if (!Number.isFinite(budget) || budget <= 0)
     throw Error("Storage budget must be positive");
   const dry = !!options["dry-run"];
-  const sql = dry ? null : providedSql || database();
+  const sql = dry || providedCommit ? null : providedSql || database();
   const read =
     providedRead ||
     createSourceClient({ userAgent: options["user-agent"], interval, signal });
@@ -422,9 +422,11 @@ export async function harvest(
           sources,
           dry,
           archiveQuery: ARCHIVE_QUERY,
-          database: dry
-            ? "dry-run"
-            : process.env.DATABASE_URL || "injected-test-database",
+          database: providedCommit
+            ? options.endpoint || "remote-import"
+            : dry
+              ? "dry-run"
+              : process.env.DATABASE_URL || "injected-test-database",
           output: options.output ? resolve(options.output) : null,
         }),
       )
@@ -482,6 +484,7 @@ export async function harvest(
             );
           await retry(() => sql.query(query.text, query.values));
         }
+        if (!dry && providedCommit) await providedCommit(batch);
         if (options.output) {
           const output = resolve(options.output);
           await mkdir(dirname(output), { recursive: true });

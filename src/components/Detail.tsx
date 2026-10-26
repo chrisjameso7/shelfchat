@@ -163,7 +163,7 @@ export default function Detail({
           {book.sourceUrl && (
             <p className="source-credit">
               <a href={book.sourceUrl} target="_blank" rel="noreferrer">
-                View source at Internet Archive ↗
+                View original edition ↗
               </a>
               {book.licenseUrl && (
                 <>

@@ -19,14 +19,17 @@ function problem(message, status = 400) {
   e.status = status;
   return e;
 }
-async function body(req) {
-  if (req.body && typeof req.body === "object" && !Buffer.isBuffer(req.body))
+async function body(req, maxBytes = 16384) {
+  if (req.body && typeof req.body === "object" && !Buffer.isBuffer(req.body)) {
+    if (Buffer.byteLength(JSON.stringify(req.body)) > maxBytes)
+      throw problem("Request is too large.", 413);
     return req.body;
+  }
   const bytes = [];
   let size = 0;
   for await (const chunk of req) {
     size += chunk.length;
-    if (size > 16384) throw problem("Request is too large.", 413);
+    if (size > maxBytes) throw problem("Request is too large.", 413);
     bytes.push(chunk);
   }
   try {
@@ -47,6 +50,15 @@ export default async function handler(req, res) {
   try {
     if (req.method === "GET" && route === "config")
       return json(res, 200, { transport: "poll", uploads: "blob" });
+    if (req.method === "POST" && route === "admin/import") {
+      const { authorizeImport, commitImport } = await import(
+        "../cloud/admin-import.js"
+      );
+      if (!authorizeImport(req.headers.authorization))
+        throw problem("Unauthorized import.", 401);
+      const payload = await body(req, 512 * 1024);
+      return json(res, 200, await commitImport(database(), payload.books));
+    }
     const sql = database();
     if (req.method === "GET" && route === "catalog") {
       const result = await catalogPage(sql, url.searchParams);
