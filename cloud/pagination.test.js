@@ -12,6 +12,7 @@ test("catalog query binds search values, limits rows and rejects mismatched curs
   assert.ok(!query.text.includes("DROP TABLE"));
   assert.ok(!query.text.includes("OFFSET"));
   assert.match(query.text, /search_document @@/);
+  assert.match(query.text, /created_at::text AS "sortValue"/);
   assert.equal(query.values.at(-1), 49);
   const cursor = Buffer.from(
     JSON.stringify({
