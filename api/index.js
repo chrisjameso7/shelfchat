@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { head } from "@vercel/blob";
+import { head, getDownloadUrl } from "@vercel/blob";
 import { handleUpload } from "@vercel/blob/client";
 import { database, snapshot, rateLimit } from "../cloud/db.js";
 import { clean, safeUrl, noteInput } from "../server/validation.js";
@@ -202,7 +202,8 @@ export default async function handler(req, res) {
         await sql`WITH updated AS (UPDATE shelfchat_books SET downloads=downloads+1 WHERE id=${download[1]} RETURNING title,url),event AS (INSERT INTO shelfchat_activity(message) SELECT 'A reader picked up '||title FROM updated) SELECT url FROM updated`;
       if (!rows.length) throw problem("Book not found.", 404);
       res.statusCode = 302;
-      res.setHeader("Location", rows[0].url);
+      const target = new URL(rows[0].url);
+      res.setHeader("Location", target.hostname === process.env.BLOB_STORE_HOSTNAME ? getDownloadUrl(target.href) : target.href);
       return res.end();
     }
     return json(res, 404, { error: "Endpoint not found." });
