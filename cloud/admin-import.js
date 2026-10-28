@@ -46,7 +46,7 @@ export function importRecords(input) {
             ? !["www.gutenberg.org", "gutenberg.org"].includes(host)
             : !(
                 host === "archive.org" ||
-                /^(?:ia|dn)\d+[a-z0-9-]*\.archive\.org$/.test(host)
+                /^(?:ia|dn)\d+[a-z0-9.-]*\.archive\.org$/.test(host)
               )
         )
           throw Object.assign(

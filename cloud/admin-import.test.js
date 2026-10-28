@@ -66,3 +66,9 @@ test("operator commits enforce capacity before any write and preserve batched qu
   await assert.rejects(commitImport(sql, [book]), /capacity/);
   assert.equal(writes, 1);
 });
+
+test('Archive regional download hosts qualify without allowing foreign domains',()=> {
+ const archive={...book,id:'ia-classic',sourceUrl:'https://archive.org/details/classic',editions:{EPUB:{url:'https://archive.org/download/classic/book.epub',fallbackUrls:['https://ia800001.us.archive.org/1/items/classic/book.epub'],size:100}}};
+ assert.equal(importRecords([archive])[0].editions.EPUB.fallbackUrls.length,1);
+ assert.throws(()=>importRecords([{...archive,editions:{EPUB:{url:'https://archive.org/download/classic/book.epub',fallbackUrls:['https://ia800001.us.archive.org.example.com/book.epub']}}}]),/host/);
+});
