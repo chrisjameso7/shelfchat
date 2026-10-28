@@ -165,7 +165,7 @@ export function UploadForm({ onClose }: { onClose: () => void }) {
           <input name="file" type="file" accept=".pdf,.epub" />
         </label>
         <label>
-          Or a direct HTTPS file link
+          Or a Gutenberg / Internet Archive HTTPS file link
           <input name="url" type="url" placeholder="https://…/book.epub" />
         </label>
         <label>

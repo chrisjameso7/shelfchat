@@ -1,3 +1,4 @@
+import { probeEdition } from "../cloud/file-verification.js";
 import { randomUUID } from "node:crypto";
 import { head, getDownloadUrl } from "@vercel/blob";
 import { handleUpload } from "@vercel/blob/client";
@@ -287,6 +288,13 @@ export default async function handler(req, res) {
           fileUrl = safeUrl(b.url);
           if (!["PDF", "EPUB"].includes(format))
             throw problem("Choose PDF or EPUB.");
+          const verified = await probeEdition({ url: fileUrl }, format);
+          if (verified.status !== "ok")
+            throw problem(
+              "We could not verify a readable PDF/EPUB at this link. Use a Gutenberg or Internet Archive file link, or upload the file directly.",
+              400,
+            );
+          fileUrl = verified.url;
         }
         const id = b.uploadId || randomUUID();
         const insert = b.uploadId
