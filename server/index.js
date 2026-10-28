@@ -1,3 +1,4 @@
+import { marginInput, marginCursor } from "../cloud/margins.js";
 import { getVibe } from "../shared/vibes.js";
 import express from "express";
 import helmet from "helmet";
@@ -397,6 +398,69 @@ app.get("/api/books/:id/content", (req, res) => {
   res.set("Content-Disposition", "inline");
   res.sendFile(path.join(dataDir, "files", book.file));
 });
+db.exec(
+  "CREATE TABLE IF NOT EXISTS margins(id TEXT PRIMARY KEY,handle TEXT NOT NULL,tag TEXT NOT NULL,text TEXT NOT NULL CHECK(length(text) BETWEEN 1 AND 500),createdAt TEXT NOT NULL,expiresAt TEXT NOT NULL); CREATE INDEX IF NOT EXISTS margins_expiry ON margins(expiresAt); CREATE INDEX IF NOT EXISTS margins_recent ON margins(createdAt DESC,id DESC);",
+);
+app.get("/api/margins", (req, res, next) => {
+  try {
+    const now = new Date().toISOString(),
+      cursor = marginCursor(req.query.cursor);
+    db.prepare("DELETE FROM margins WHERE expiresAt<=?").run(now);
+    const rows = db
+      .prepare(
+        "SELECT *,createdAt AS sortValue FROM margins WHERE expiresAt>? " +
+          (cursor ? "AND (createdAt,id)<(?,?)" : "") +
+          " ORDER BY createdAt DESC,id DESC LIMIT 31",
+      )
+      .all(now, ...(cursor ? [cursor.at, cursor.id] : []));
+    const last = rows[29];
+    res.json({
+      posts: rows.slice(0, 30).map(({ sortValue, ...post }) => post),
+      serverNow: now,
+      nextCursor:
+        rows.length > 30
+          ? Buffer.from(
+              JSON.stringify({ at: last.sortValue, id: last.id }),
+            ).toString("base64url")
+          : null,
+    });
+  } catch (e) {
+    next(e);
+  }
+});
+app.post("/api/margins", writes, (req, res, next) => {
+  try {
+    const input = marginInput(req.body);
+    const stamp = Date.now();
+    const post = {
+      id: randomUUID(),
+      ...input,
+      createdAt: new Date(stamp).toISOString(),
+      expiresAt: new Date(stamp + 72 * 60 * 60 * 1000).toISOString(),
+    };
+    db.prepare(
+      "INSERT INTO margins(id,handle,tag,text,createdAt,expiresAt) VALUES(?,?,?,?,?,?)",
+    ).run(
+      post.id,
+      post.handle,
+      post.tag,
+      post.text,
+      post.createdAt,
+      post.expiresAt,
+    );
+    res.status(201).json({ post, serverNow: new Date().toISOString() });
+  } catch (e) {
+    next(e);
+  }
+});
+const marginsCleanup = setInterval(
+  () =>
+    db
+      .prepare("DELETE FROM margins WHERE expiresAt<=?")
+      .run(new Date().toISOString()),
+  60000,
+);
+marginsCleanup.unref();
 app.get("/api/health", (_req, res) => res.json({ ok: true }));
 app.get("/api/snapshot", (_req, res) => res.json(snapshot()));
 app.get("/api/events", (req, res) => {

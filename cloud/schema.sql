@@ -111,3 +111,19 @@ ALTER TABLE shelfchat_search_jobs ENABLE ROW LEVEL SECURITY;
 CREATE TABLE IF NOT EXISTS shelfchat_source_limits(source text PRIMARY KEY,next_allowed_at timestamptz NOT NULL);
 -- statement
 ALTER TABLE shelfchat_source_limits ENABLE ROW LEVEL SECURITY;
+-- statement
+CREATE TABLE IF NOT EXISTS shelfchat_margins (
+ id uuid PRIMARY KEY,
+ handle text NOT NULL CHECK(length(handle) BETWEEN 2 AND 24 AND handle ~ '^[A-Za-z0-9_-]+$'),
+ tag text NOT NULL CHECK(length(tag) BETWEEN 1 AND 30),
+ text text NOT NULL CHECK(length(btrim(text)) BETWEEN 1 AND 500),
+ created_at timestamptz NOT NULL DEFAULT now(),
+ expires_at timestamptz NOT NULL DEFAULT (now()+interval '72 hours'),
+ CHECK(expires_at=created_at+interval '72 hours')
+);
+-- statement
+CREATE INDEX IF NOT EXISTS shelfchat_margins_recent ON shelfchat_margins(created_at DESC,id DESC);
+-- statement
+CREATE INDEX IF NOT EXISTS shelfchat_margins_expiry ON shelfchat_margins(expires_at);
+-- statement
+ALTER TABLE shelfchat_margins ENABLE ROW LEVEL SECURITY;

@@ -1,7 +1,8 @@
+import Community from "./components/Community";
 import Catalog from "./components/Catalog";
 import Detail from "./components/Detail";
 import { useEffect, useState } from "react";
-import { Link, Route, Routes } from "react-router-dom";
+import { Link, NavLink, Route, Routes } from "react-router-dom";
 import {
   ArrowDownToLine,
   BookOpen,
@@ -113,10 +114,12 @@ export default function App() {
           shelfchat<span className="brand-dot">.</span>
         </Link>
         <nav>
-          <Link to="/">The library</Link>
-          <a href="#heartbeat">
-            The community <span className="tiny-dot" />
-          </a>
+          <NavLink to="/" end>
+            The library
+          </NavLink>
+          <NavLink to="/community">
+            Community &amp; Margins <span className="tiny-dot" />
+          </NavLink>
         </nav>
         <div className="header-actions">
           <button
@@ -138,6 +141,15 @@ export default function App() {
           </div>
         )}
         <Routes>
+          <Route
+            path="/community"
+            element={
+              <Community
+                identity={identity}
+                chooseIdentity={() => setModal("identity")}
+              />
+            }
+          />
           <Route
             path="/"
             element={<Catalog onUpload={() => setModal("upload")} />}

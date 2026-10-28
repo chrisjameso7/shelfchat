@@ -69,7 +69,36 @@ export default async function handler(req, res) {
       }
       return json(res, 200, await commitImport(database(), payload.books));
     }
+    if (req.method === "GET" && route === "cron/margins-cleanup") {
+      const { cronAuthorized, PURGE_MARGINS } = await import(
+        "../cloud/margins.js"
+      );
+      if (!cronAuthorized(req.headers.authorization))
+        throw problem("Unauthorized cleanup.", 401);
+      const sql = database();
+      let removed = 0;
+      for (let batch = 0; batch < 20; batch++) {
+        const rows = await sql.query(PURGE_MARGINS, []);
+        removed += rows.length;
+        if (rows.length < 1000) break;
+      }
+      return json(res, 200, { removed });
+    }
     const sql = database();
+    if (route === "margins") {
+      const { marginsFeed, createMargin } = await import("../cloud/margins.js");
+      if (req.method === "GET")
+        return json(
+          res,
+          200,
+          await marginsFeed(sql, url.searchParams.get("cursor")),
+        );
+      if (req.method === "POST") {
+        await rateLimit(sql, req);
+        return json(res, 201, await createMargin(sql, await body(req)));
+      }
+      throw problem("Method not allowed.", 405);
+    }
     if (req.method === "GET" && route === "catalog") {
       const result = await catalogPage(sql, url.searchParams);
       const q = (url.searchParams.get("q") || "").trim();

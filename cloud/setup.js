@@ -104,9 +104,11 @@ console.log(
   JSON.stringify(await storageReport(sql)),
 );
 
-const { claimLookup, lookupIdentity,sourceSlot } = await import("./jit-search.js");
-await sourceSlot(sql,'https://www.gutenberg.org/',AbortSignal.timeout(5000));
-console.log('Neon provider request gate verified.');
+const { claimLookup, lookupIdentity, sourceSlot } = await import(
+  "./jit-search.js"
+);
+await sourceSlot(sql, "https://www.gutenberg.org/", AbortSignal.timeout(5000));
+console.log("Neon provider request gate verified.");
 const diagnostic = "ShelfChat lookup coordination " + randomUUID();
 try {
   const claims = await Promise.all([
@@ -119,3 +121,19 @@ try {
 } finally {
   await sql`DELETE FROM shelfchat_search_jobs WHERE key=${lookupIdentity(diagnostic).key}`;
 }
+
+// Build-time checks use already-expired rows inside one transaction; no demo posts enter the feed.
+const marginProbeId = randomUUID();
+const [, removedMargins] = await sql.transaction([
+  sql`INSERT INTO shelfchat_margins(id,handle,tag,text,created_at,expires_at) VALUES(${marginProbeId},'schema_probe','test','Expired lifecycle verification',now()-interval '73 hours',now()-interval '1 hour')`,
+  sql`DELETE FROM shelfchat_margins WHERE id=${marginProbeId} AND expires_at<=now() RETURNING id`,
+]);
+if (!removedMargins.some((row) => row.id === marginProbeId))
+  throw Error("Margins expiry purge failed.");
+try {
+  await sql`INSERT INTO shelfchat_margins(id,handle,tag,text,expires_at) VALUES(${randomUUID()},'schema_probe','test','Invalid lifecycle verification',now()+interval '74 hours')`;
+  throw Error("Margins lifecycle constraint did not reject a custom expiry.");
+} catch (error) {
+  if (error.code !== "23514") throw error;
+}
+console.log("Margins 72-hour database constraint and expiry cleanup verified.");

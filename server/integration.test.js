@@ -1,3 +1,5 @@
+import { DatabaseSync } from "node:sqlite";
+import { randomUUID } from "node:crypto";
 import test from "node:test";
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
@@ -96,6 +98,72 @@ test("shared catalog, uploads, marginalia, downloads and live feed", async () =>
     });
     assert.equal(response.status, 400);
     assert.equal((await fetch(base + "/books/missing/download")).status, 404);
+    const marginInput = {
+      handle: "reader",
+      tag: "they/them",
+      text: "A temporary thought <img src=x>",
+    };
+    response = await fetch(base + "/margins", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(marginInput),
+    });
+    assert.equal(response.status, 201);
+    const { post } = await response.json();
+    assert.equal(
+      Date.parse(post.expiresAt) - Date.parse(post.createdAt),
+      72 * 60 * 60 * 1000,
+    );
+    assert.equal(post.text, marginInput.text);
+    response = await fetch(base + "/margins", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ...marginInput, image: "not-allowed" }),
+    });
+    assert.equal(response.status, 400);
+    const marginDB = new DatabaseSync(path.join(directory, "shelfchat.sqlite"));
+    try {
+      const expiredId = randomUUID();
+      const insertMargin = marginDB.prepare(
+        "INSERT INTO margins(id,handle,tag,text,createdAt,expiresAt) VALUES(?,?,?,?,?,?)",
+      );
+      insertMargin.run(
+        expiredId,
+        "expired",
+        "reader",
+        "Expired fixture",
+        new Date(Date.now() - 73 * 3600000).toISOString(),
+        new Date(Date.now() - 3600000).toISOString(),
+      );
+      for (let i = 0; i < 31; i++)
+        insertMargin.run(
+          randomUUID(),
+          "reader",
+          "reader",
+          "Pagination fixture " + i,
+          new Date(Date.now() - i * 1000).toISOString(),
+          new Date(Date.now() + 3600000).toISOString(),
+        );
+      const feed = await (await fetch(base + "/margins")).json();
+      assert.equal(feed.posts.length, 30);
+      assert.ok(feed.nextCursor);
+      assert.ok(!feed.posts.some((p) => p.id === expiredId));
+      assert.equal(
+        marginDB
+          .prepare("SELECT count(*) AS count FROM margins WHERE id=?")
+          .get(expiredId).count,
+        0,
+      );
+      const older = await (
+        await fetch(base + "/margins?cursor=" + feed.nextCursor)
+      ).json();
+      assert.equal(older.posts.length, 2);
+      assert.ok(
+        !older.posts.some((p) => feed.posts.some((first) => first.id === p.id)),
+      );
+    } finally {
+      marginDB.close();
+    }
   } finally {
     child.kill();
     await new Promise((resolve) => {
