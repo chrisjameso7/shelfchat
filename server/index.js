@@ -430,10 +430,29 @@ app.get("/api/margins", (req, res, next) => {
 });
 app.post("/api/margins", writes, (req, res, next) => {
   try {
-    const input = marginInput(req.body);
+    const { requestId, ...input } = marginInput(req.body);
+    if (requestId) {
+      const existing = db
+        .prepare("SELECT * FROM margins WHERE id=?")
+        .get(requestId);
+      if (existing) {
+        if (
+          ["handle", "tag", "text"].some((key) => existing[key] !== input[key])
+        )
+          return res
+            .status(409)
+            .json({
+              error:
+                "This request was already used. Edit your draft and try again.",
+            });
+        return res
+          .status(201)
+          .json({ post: existing, serverNow: new Date().toISOString() });
+      }
+    }
     const stamp = Date.now();
     const post = {
-      id: randomUUID(),
+      id: requestId || randomUUID(),
       ...input,
       createdAt: new Date(stamp).toISOString(),
       expiresAt: new Date(stamp + 72 * 60 * 60 * 1000).toISOString(),

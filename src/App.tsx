@@ -2,7 +2,7 @@ import Community from "./components/Community";
 import Catalog from "./components/Catalog";
 import Detail from "./components/Detail";
 import { useEffect, useState } from "react";
-import { Link, NavLink, Route, Routes } from "react-router-dom";
+import { Link, NavLink, Route, Routes, useLocation } from "react-router-dom";
 import {
   ArrowDownToLine,
   BookOpen,
@@ -15,6 +15,7 @@ import { IdentityForm, UploadForm } from "./components/Forms";
 import type { Identity, Snapshot, SnapshotDelta } from "./types";
 const initial: Snapshot = { books: [], notes: [], activity: [], online: 0 };
 export default function App() {
+  const { pathname } = useLocation();
   const [data, setData] = useState(initial);
   const [identity, setIdentity] = useState<Identity | null>(readIdentity);
   const [modal, setModal] = useState<"identity" | "upload" | null>(() =>
@@ -173,48 +174,49 @@ export default function App() {
             }
           />
         </Routes>
-        <section className="heartbeat" id="heartbeat">
-          <div>
-            <span className="eyebrow">
-              <Radio size={14} /> THE READING ROOM
-            </span>
-            <h2>
-              Quiet pages. <em>Good company.</em>
-            </h2>
-            <p>Somewhere, someone is finding their next favorite sentence.</p>
-            <span className="live">
-              <span className={connected ? "tiny-dot" : "offline-dot"} />
-              {connected
-                ? `${data.online} surfers online`
-                : "Reconnecting to the reading room…"}
-            </span>
-          </div>
-          <div className="activity">
-            {data.activity.length ? (
-              data.activity.slice(0, 4).map((a) => (
-                <div key={a.id}>
-                  <ArrowDownToLine size={14} />
-                  <span>{a.message}</span>
-                  <time>
-                    {new Date(a.createdAt).toLocaleTimeString([], {
-                      hour: "2-digit",
-                      minute: "2-digit",
-                    })}
-                  </time>
-                </div>
-              ))
-            ) : (
-              <p>The room is quiet. Start a new chapter.</p>
-            )}
-          </div>
-        </section>
+        {pathname !== "/community" && (
+          <section className="heartbeat" id="heartbeat">
+            <div>
+              <span className="eyebrow">
+                <Radio size={14} /> THE READING ROOM
+              </span>
+              <h2>
+                Quiet pages. <em>Good company.</em>
+              </h2>
+
+              <span className="live">
+                <span className={connected ? "tiny-dot" : "offline-dot"} />
+                {connected
+                  ? `${data.online} surfers online`
+                  : "Reconnecting to the reading room…"}
+              </span>
+            </div>
+            <div className="activity">
+              {data.activity.length ? (
+                data.activity.slice(0, 4).map((a) => (
+                  <div key={a.id}>
+                    <ArrowDownToLine size={14} />
+                    <span>{a.message}</span>
+                    <time>
+                      {new Date(a.createdAt).toLocaleTimeString([], {
+                        hour: "2-digit",
+                        minute: "2-digit",
+                      })}
+                    </time>
+                  </div>
+                ))
+              ) : (
+                <p>No recent activity.</p>
+              )}
+            </div>
+          </section>
+        )}
       </main>
       <footer>
         <Link className="brand" to="/">
           shelfchat.
         </Link>
         <span>An open shelf for restless minds.</span>
-        <span className="mono">READ. LEAVE A MARK. PASS IT ON. ↗</span>
       </footer>
       {modal === "identity" && (
         <IdentityForm

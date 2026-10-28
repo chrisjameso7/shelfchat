@@ -99,6 +99,7 @@ test("shared catalog, uploads, marginalia, downloads and live feed", async () =>
     assert.equal(response.status, 400);
     assert.equal((await fetch(base + "/books/missing/download")).status, 404);
     const marginInput = {
+      requestId: randomUUID(),
       handle: "reader",
       tag: "they/them",
       text: "A temporary thought <img src=x>",
@@ -115,6 +116,15 @@ test("shared catalog, uploads, marginalia, downloads and live feed", async () =>
       72 * 60 * 60 * 1000,
     );
     assert.equal(post.text, marginInput.text);
+    const retry = await fetch(base + "/margins", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(marginInput),
+    });
+    const repeated = await retry.json();
+    assert.equal(retry.status, 201);
+    assert.equal(repeated.post.id, post.id);
+    assert.equal(repeated.post.expiresAt, post.expiresAt);
     response = await fetch(base + "/margins", {
       method: "POST",
       headers: { "Content-Type": "application/json" },

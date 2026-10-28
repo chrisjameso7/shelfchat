@@ -137,3 +137,35 @@ try {
   if (error.code !== "23514") throw error;
 }
 console.log("Margins 72-hour database constraint and expiry cleanup verified.");
+
+// Exercise the real posting/upsert SQL without leaving test content in the public feed.
+const { createMargin } = await import("./margins.js");
+const postProbeId = randomUUID(),
+  postQueries = [];
+const capturePosts = {
+  query: async (text, values) => {
+    postQueries.push(sql.query(text, values));
+    return [{ id: values[0] }];
+  },
+};
+const probePost = {
+  requestId: postProbeId,
+  handle: "posting_probe",
+  tag: "test",
+  text: "Posting transaction verification",
+};
+await createMargin(capturePosts, probePost);
+await createMargin(capturePosts, probePost);
+const [firstPost, repeatedPost] = await sql.transaction([
+  ...postQueries,
+  sql`DELETE FROM shelfchat_margins WHERE id=${postProbeId} RETURNING id`,
+]);
+if (
+  firstPost[0].id !== repeatedPost[0].id ||
+  new Date(firstPost[0].expiresAt).getTime() !==
+    new Date(repeatedPost[0].expiresAt).getTime()
+)
+  throw Error("Margin retries were not idempotent.");
+console.log(
+  "Production margin posting and retry SQL verified without visible test posts.",
+);

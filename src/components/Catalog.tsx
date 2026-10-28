@@ -112,37 +112,16 @@ export default function Catalog({ onUpload }: { onUpload: () => void }) {
   return (
     <>
       <section className="hero">
-        <div className="eyebrow">
-          <span className="tiny-dot" />{" "}
-          {total < 45000
-            ? "OUR NEXT CHAPTER · LIBRARY GOAL"
-            : "INDEPENDENT MINDS. SHARED SHELVES."}
-        </div>
         <h1>
-          Over 45,000+ Free Underground <em>EPUBs &amp; PDFs</em>
+          Books worth
+          <br />
+          <em>getting lost in.</em>
         </h1>
         <div className="hero-bottom">
           <p>Find your book soulmate in the marginalia.</p>
           <a className="hero-link" href="#catalog">
             Find something good <ArrowDown size={17} />
           </a>
-        </div>
-        <p className="inventory-note mono" role="status">
-          {loading && !total
-            ? "COUNTING THE SHELVES"
-            : `${total.toLocaleString()} REAL TITLES INDEXED`}{" "}
-          · GROWING TOWARD 75,000
-          {total < 45000 && (
-            <span>45,000+ is our library goal, not the current inventory.</span>
-          )}
-        </p>
-        <div className="hero-stamp">
-          <BookOpen size={24} />
-          <span>
-            OPEN SHELVES
-            <br />
-            OPEN MINDS
-          </span>
         </div>
       </section>
       <section id="catalog" className="catalog">
@@ -227,9 +206,6 @@ export default function Catalog({ onUpload }: { onUpload: () => void }) {
               {item.label}
             </button>
           ))}
-          <span className="vibe-hint mono">
-            Subject-based shelves. Tap again to clear.
-          </span>
         </div>
         <div className="collection-row">
           <label htmlFor="collection" className="mono">
@@ -252,9 +228,6 @@ export default function Catalog({ onUpload }: { onUpload: () => void }) {
             <option value="queer-fiction">Queer fiction</option>
             <option value="horror">Horror &amp; the uncanny</option>
           </select>
-          <span className="mono">
-            Editorial collections - downloads where authorized
-          </span>
         </div>
         <div className="filters">
           {[
@@ -416,12 +389,6 @@ export default function Catalog({ onUpload }: { onUpload: () => void }) {
             </button>
           </div>
         )}
-        <p className="shelf-end">
-          {!!nextCursor
-            ? "THERE’S MORE ON THE NEXT SHELF. KEEP EXPLORING."
-            : "YOU’VE REACHED THE END OF THIS SHELF. THE NEXT ONE IS YOURS TO BUILD."}{" "}
-          <ArrowUpRight size={14} />
-        </p>
       </section>
       <section
         className="creator-portal"
@@ -429,39 +396,13 @@ export default function Catalog({ onUpload }: { onUpload: () => void }) {
         aria-labelledby="creator-heading"
       >
         <div>
-          <span className="eyebrow">
-            WRITERS / SMALL PRESSES / INDEPENDENT VOICES
-          </span>
-          <h2 id="creator-heading">
-            The next underground classic
-            <br />
-            <em>could be yours.</em>
-          </h2>
-          <p>
-            Bring your own work to the shelf. Share a PDF or EPUB, introduce
-            your story, and let readers meet you in the margins.
-          </p>
+          <span className="eyebrow">FOR WRITERS</span>
+          <h2 id="creator-heading">Share your book.</h2>
+          <p>Share a PDF or EPUB with the community.</p>
           <button className="primary" onClick={onUpload}>
             Submit your work <ArrowUpRight size={16} />
           </button>
         </div>
-        <ol className="submission-steps">
-          <li>
-            <span className="mono">01 / INTRODUCE IT</span>
-            <p>Title, author, and a few words about your book.</p>
-          </li>
-          <li>
-            <span className="mono">02 / SHARE THE FILE</span>
-            <p>Upload your PDF or EPUB, or provide a direct file link.</p>
-          </li>
-          <li>
-            <span className="mono">03 / OPEN THE MARGINS</span>
-            <p>
-              Confirm your publishing rights and join the conversation. No
-              signup wall.
-            </p>
-          </li>
-        </ol>
       </section>
     </>
   );

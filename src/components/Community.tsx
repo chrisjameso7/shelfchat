@@ -6,7 +6,6 @@ import {
   type FormEvent,
 } from "react";
 import { Clock3, Feather, ArrowDown, ArrowUpRight } from "lucide-react";
-import { Link } from "react-router-dom";
 import { api } from "../api";
 import type { Identity } from "../types";
 type Margin = {
@@ -40,7 +39,9 @@ export default function Community({
     [loadingMore, setLoadingMore] = useState(false),
     [cursor, setCursor] = useState<string | null>(null),
     [now, setNow] = useState(Date.now()),
-    [notice, setNotice] = useState("");
+    [notice, setNotice] = useState(""),
+    [postError, setPostError] = useState("");
+  const requestId = useRef<string | null>(null);
   const offset = useRef(0),
     loadedMore = useRef(false),
     alive = useRef(true),
@@ -124,16 +125,19 @@ export default function Community({
       return;
     }
     if (sending || !draft.trim()) return;
+    requestId.current ||= crypto.randomUUID();
     setSending(true);
-    setError("");
+    setPostError("");
     setNotice("");
     try {
       const result = await api<{ post: Margin; serverNow: string }>(
         "/margins",
         {
           method: "POST",
+          timeoutMs: 15000,
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
+            requestId: requestId.current,
             handle: identity.handle,
             tag: identity.tag,
             text: draft.trim(),
@@ -147,9 +151,10 @@ export default function Community({
         ...old.filter((p) => p.id !== result.post.id),
       ]);
       setDraft("");
-      setNotice("Your margin is here. It vanishes in 72 hours.");
+      requestId.current = null;
+      setNotice("Posted.");
     } catch (e) {
-      if (alive.current) setError((e as Error).message);
+      if (alive.current) setPostError((e as Error).message);
     } finally {
       if (alive.current) setSending(false);
     }
@@ -183,48 +188,39 @@ export default function Community({
   return (
     <section className="community-page">
       <div className="community-intro">
-        <span className="eyebrow">
-          <span className="tiny-dot" /> COMMUNITY / MARGINS
-        </span>
+        <h1>
+          Margins<span className="community-dot">.</span>
+        </h1>
+        <p>A thought between pages.</p>
         <span className="margin-lifetime mono">
           <Clock3 size={13} />
-          72 HOURS. THEN GONE.
+          Posts vanish after 3 days
         </span>
-        <h1>
-          Some thoughts belong
-          <br />
-          <em>in the margins.</em>
-        </h1>
-        <p>
-          Late-night musings. A book you can’t shake. A small thought for
-          whoever is here.
-        </p>
-        <Link className="text-button" to="/">
-          Back to the library <ArrowUpRight size={14} />
-        </Link>
       </div>
       <div className="community-layout">
         <div>
           <form className="margin-composer" onSubmit={submit}>
             <label htmlFor="margin-text">
               <Feather size={16} />
-              {identity
-                ? `Writing as @${identity.handle}`
-                : "Leave a little thought"}
+              {identity ? `@${identity.handle}` : "Your thoughts"}
             </label>
             <textarea
               id="margin-text"
               value={draft}
-              onChange={(e) => setDraft(e.target.value)}
+              onChange={(e) => {
+                setDraft(e.target.value);
+                requestId.current = null;
+              }}
+              disabled={sending}
               maxLength={500}
               required
               rows={4}
-              placeholder="What’s living rent-free in your reading mind?"
+              placeholder="What are you reading?"
               aria-describedby="margin-guidance"
             />
             <div className="composer-bottom">
               <span id="margin-guidance" className="mono">
-                WORDS ONLY · {draft.length}/500
+                {draft.length}/500
               </span>
               <button
                 type={identity ? "submit" : "button"}
@@ -232,15 +228,16 @@ export default function Community({
                 disabled={sending || (!!identity && !draft.trim())}
                 onClick={identity ? undefined : chooseIdentity}
               >
-                {sending
-                  ? "Leaving your margin…"
-                  : identity
-                    ? "Leave a margin"
-                    : "Choose a handle"}
+                {sending ? "Posting…" : identity ? "Post" : "Choose a handle"}
                 <ArrowUpRight size={15} />
               </button>
             </div>
           </form>
+          {postError && (
+            <p className="notice" role="alert">
+              {postError}
+            </p>
+          )}
           {notice && (
             <p className="margin-notice" role="status">
               {notice}
@@ -249,12 +246,11 @@ export default function Community({
           {error && (
             <p className="notice" role="alert">
               {error}
-              <button onClick={() => void refresh()}>Retry feed</button>
+              <button onClick={() => void refresh()}>Refresh</button>
             </p>
           )}
           <div className="margins-feed-heading">
-            <h2>In the room right now</h2>
-            <span className="mono">RECENT FIRST / FADING ALWAYS</span>
+            <h2>Latest</h2>
           </div>
           <div
             className="margins-feed"
@@ -264,7 +260,7 @@ export default function Community({
           >
             {loading ? (
               <p className="empty" role="status">
-                Opening the darkroom…
+                Loading…
               </p>
             ) : visible.length ? (
               visible.map((post) => (
@@ -303,8 +299,7 @@ export default function Community({
             ) : (
               <div className="empty">
                 <Feather size={23} />
-                <h3>The margins are quiet.</h3>
-                <p>Leave the first thought. No permanent record required.</p>
+                <h3>No posts yet.</h3>
               </div>
             )}
           </div>
@@ -314,37 +309,11 @@ export default function Community({
               onClick={() => void more()}
               disabled={loadingMore}
             >
-              {loadingMore ? "Opening older margins…" : "Earlier in the room"}
+              {loadingMore ? "Loading…" : "More"}
               <ArrowDown size={14} />
             </button>
           )}
         </div>
-        <aside className="community-aside">
-          <span className="eyebrow">A SMALL, TEMPORARY ROOM</span>
-          <h2>
-            Words.
-            <br />
-            Company.
-            <br />
-            <em>No forever.</em>
-          </h2>
-          <p>
-            Every margin leaves the feed after three days. There are no image
-            uploads, videos, or popularity scores here.
-          </p>
-          <p>
-            Your handle travels with you from the library. Change it anytime.
-          </p>
-          <div className="margin-room-rule mono">
-            LEAVE ROOM FOR OTHER VOICES.
-            <br />
-            BE KIND IN THE MARGINS.
-          </div>
-          <p className="expiry-note">
-            Posts disappear at 72 hours. Expired records are purged on feed
-            visits and by daily cleanup.
-          </p>
-        </aside>
       </div>
     </section>
   );

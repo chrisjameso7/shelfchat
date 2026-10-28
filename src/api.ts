@@ -1,15 +1,35 @@
-export async function api<T>(url: string, init?: RequestInit): Promise<T> {
-  const response = await fetch("/api" + url, init);
-  if (!response.ok) {
-    const body = await response
-      .json()
-      .catch(() => ({ error: "Request failed. Please try again." }));
-    throw new Error(body.error);
+export async function api<T>(
+  url: string,
+  init?: RequestInit & { timeoutMs?: number },
+): Promise<T> {
+  const deadline = AbortSignal.timeout(
+    init?.timeoutMs ?? (url.includes("/read?") ? 45000 : 20000),
+  );
+  const headers = new Headers(init?.headers);
+  if (typeof init?.body === "string" && !headers.has("Content-Type"))
+    headers.set("Content-Type", "application/json");
+  try {
+    const response = await fetch("/api" + url, {
+      ...init,
+      headers,
+      signal: init?.signal
+        ? AbortSignal.any([init.signal, deadline])
+        : deadline,
+    });
+    if (!response.ok) {
+      const body = await response
+        .json()
+        .catch(() => ({ error: "Request failed. Try again." }));
+      throw new Error(body.error || "Request failed. Try again.");
+    }
+    const result = await response.json();
+    if (init?.method && init.method !== "GET")
+      window.dispatchEvent(new Event("shelfchat:refresh"));
+    return result;
+  } catch (error) {
+    if (deadline.aborted) throw new Error("Request timed out. Try again.");
+    throw error;
   }
-  const result = await response.json();
-  if (init?.method && init.method !== "GET")
-    window.dispatchEvent(new Event("shelfchat:refresh"));
-  return result;
 }
 export type Capabilities = {
   transport: "poll" | "sse";

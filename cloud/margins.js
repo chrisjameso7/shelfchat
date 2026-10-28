@@ -6,18 +6,30 @@ export function marginInput(body) {
     !body ||
     typeof body !== "object" ||
     Array.isArray(body) ||
-    Object.keys(body).some((key) => !["handle", "tag", "text"].includes(key))
+    Object.keys(body).some(
+      (key) => !["handle", "tag", "text", "requestId"].includes(key),
+    )
   )
     throw Object.assign(
       Error("Margins accept only a handle, identity tag, and plain text."),
       { status: 400 },
     );
+  if (
+    body.requestId !== undefined &&
+    !/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i.test(
+      body.requestId,
+    )
+  )
+    throw Object.assign(Error("Invalid request ID."), { status: 400 });
   const result = noteInput(body);
   if (result.text.length > 500)
     throw Object.assign(Error("Keep your margin to 500 characters."), {
       status: 400,
     });
-  return result;
+  return {
+    ...result,
+    ...(body.requestId ? { requestId: body.requestId } : {}),
+  };
 }
 export function marginCursor(value) {
   if (!value) return null;
@@ -74,8 +86,13 @@ export async function marginsFeed(sql, cursorValue) {
 export async function createMargin(sql, input) {
   const post = marginInput(input);
   const [row] = await sql.query(
-    `INSERT INTO shelfchat_margins(id,handle,tag,text) VALUES($1,$2,$3,$4) RETURNING id,handle,tag,text,created_at AS "createdAt",expires_at AS "expiresAt"`,
-    [randomUUID(), post.handle, post.tag, post.text],
+    `INSERT INTO shelfchat_margins(id,handle,tag,text) VALUES($1,$2,$3,$4) ON CONFLICT(id) DO UPDATE SET id=excluded.id WHERE shelfchat_margins.handle=excluded.handle AND shelfchat_margins.tag=excluded.tag AND shelfchat_margins.text=excluded.text RETURNING id,handle,tag,text,created_at AS "createdAt",expires_at AS "expiresAt"`,
+    [post.requestId || randomUUID(), post.handle, post.tag, post.text],
   );
+  if (!row)
+    throw Object.assign(
+      Error("This request was already used. Edit your draft and try again."),
+      { status: 409 },
+    );
   return { post: row, serverNow: new Date().toISOString() };
 }

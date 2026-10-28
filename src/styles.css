@@ -1793,3 +1793,44 @@ nav a[aria-current="page"] {
     -webkit-backdrop-filter: none;
   }
 }
+.community-layout {
+  grid-template-columns: minmax(0, 800px);
+  justify-content: center;
+  gap: 0;
+}
+.community-intro {
+  max-width: 800px;
+  margin: auto;
+  padding-bottom: 25px;
+}
+.community-intro h1 {
+  font-size: 60px;
+  margin: 8px 0 12px;
+}
+.community-dot {
+  color: #b59be6;
+}
+.community-intro > p {
+  margin: 0;
+  font-size: 14px;
+}
+.community-intro .margin-lifetime {
+  position: static;
+  margin-top: 18px;
+  font-size: 10px;
+}
+@media (max-width: 720px) {
+  .community-intro h1 {
+    font-size: 46px;
+  }
+  .community-page {
+    padding-top: 25px;
+  }
+  .community-intro {
+    padding-bottom: 22px;
+  }
+}
+.creator-portal {
+  grid-template-columns: 1fr;
+  padding: 28px;
+}
