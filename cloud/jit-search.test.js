@@ -58,6 +58,7 @@ test("lookup persists files before marking completion; errors do not create fake
   const job = { key: "key", token: "token", q: "Moonstone" };
   await performLookup(sql, job, {
     resolver: async () => ({ books: [gutenbergBook(xml)], incomplete: false }),
+    verifier: async (book) => book,
   });
   assert.equal(writes.length, 1);
   assert.match(writes[0].text, /INSERT INTO shelfchat_books/);

@@ -20,8 +20,8 @@ import { normalize, insertBatch, retry } from "./import-library.mjs";
 const ATOM = "http://www.w3.org/2005/Atom";
 const PG_START =
   "https://www.gutenberg.org/ebooks/search.opds/?sort_order=downloads";
-const ARCHIVE_QUERY =
-  "mediatype:texts AND (collection:americana OR collection:toronto OR collection:smithsonian OR collection:biodiversity) AND year:[1500 TO 1929] AND NOT access-restricted-item:true";
+export const ARCHIVE_QUERY =
+  'mediatype:texts AND (collection:americana OR collection:toronto OR collection:smithsonian OR collection:biodiversity) AND year:[1500 TO 1929] AND NOT access-restricted-item:true AND licenseurl:("https://creativecommons.org/publicdomain/mark/1.0/" OR "http://creativecommons.org/publicdomain/mark/1.0/" OR "https://creativecommons.org/publicdomain/zero/1.0/" OR "http://creativecommons.org/publicdomain/zero/1.0/")';
 const aliases = new Map([
   ["5200", "metamorphosis"],
   ["1342", "pride-prejudice"],
@@ -374,7 +374,13 @@ export function createSourceClient({
 
 export async function harvest(
   options,
-  { sql: providedSql, read: providedRead, commit: providedCommit, signal } = {},
+  {
+    sql: providedSql,
+    read: providedRead,
+    commit: providedCommit,
+    verify: providedVerify,
+    signal,
+  } = {},
 ) {
   const sources = String(options.sources || "gutenberg,archive").split(",");
   if (
@@ -573,6 +579,7 @@ export async function harvest(
           if (error.status === 404) book = null;
           else throw error;
         }
+        if (book && providedVerify) book = await providedVerify(book);
         if (book) {
           batch.push(book);
           bytes += Buffer.byteLength(JSON.stringify(book));

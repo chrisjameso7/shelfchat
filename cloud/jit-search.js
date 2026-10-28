@@ -1,3 +1,4 @@
+import { verifiedBook } from "./file-verification.js";
 import { createHash, randomUUID } from "node:crypto";
 import { setTimeout as sleep } from "node:timers/promises";
 
@@ -27,9 +28,16 @@ export async function claimLookup(sql, query, { beforeClaim } = {}) {
       retryAfterMs: 1500,
     };
   await beforeClaim?.();
-  const [capacity]=await sql`SELECT pg_database_size(current_database())::float8 AS bytes,(SELECT count(*)::integer FROM shelfchat_search_jobs WHERE status='pending' AND expires_at>now()) AS pending`;
-  const budget=Number(process.env.CATALOG_STORAGE_BUDGET_MB||750)*1_000_000;
-  if(!Number.isFinite(budget)||Number(capacity.bytes)>=budget||capacity.pending>=4)return {key,q,dispatch:false,status:'error',retryAfterMs:5000};
+  const [capacity] =
+    await sql`SELECT pg_database_size(current_database())::float8 AS bytes,(SELECT count(*)::integer FROM shelfchat_search_jobs WHERE status='pending' AND expires_at>now()) AS pending`;
+  const budget =
+    Number(process.env.CATALOG_STORAGE_BUDGET_MB || 750) * 1_000_000;
+  if (
+    !Number.isFinite(budget) ||
+    Number(capacity.bytes) >= budget ||
+    capacity.pending >= 4
+  )
+    return { key, q, dispatch: false, status: "error", retryAfterMs: 5000 };
   const token = randomUUID();
   const rows =
     await sql`INSERT INTO shelfchat_search_jobs(key,query,status,token,expires_at) VALUES(${key},${q},'pending',${token},now()+interval '45 seconds') ON CONFLICT(key) DO UPDATE SET status='pending',token=EXCLUDED.token,expires_at=EXCLUDED.expires_at,updated_at=now() WHERE shelfchat_search_jobs.expires_at<now() RETURNING key`;
@@ -124,8 +132,15 @@ export async function resolveOpenTitle(query, { read, signal } = {}) {
           books: [...new Map(books.map((b) => [b.id, b])).values()].slice(0, 3),
           incomplete,
         };
-    } catch(error) {
-      console.warn('ShelfChat source lookup failed:',JSON.stringify({name:error.name,code:error.code,status:error.status}));
+    } catch (error) {
+      console.warn(
+        "ShelfChat source lookup failed:",
+        JSON.stringify({
+          name: error.name,
+          code: error.code,
+          status: error.status,
+        }),
+      );
       incomplete = true;
     }
   }
@@ -134,7 +149,7 @@ export async function resolveOpenTitle(query, { read, signal } = {}) {
 export async function performLookup(
   sql,
   job,
-  { resolver = resolveOpenTitle } = {},
+  { resolver = resolveOpenTitle, verifier = verifiedBook } = {},
 ) {
   const signal = AbortSignal.timeout(20000);
   let status = "error";
@@ -146,7 +161,15 @@ export async function performLookup(
       signal,
       beforeRequest: (url) => sourceSlot(sql, url, signal),
     });
-    const { books, incomplete } = await resolver(job.q, { read, signal });
+    const { books: resolved, incomplete } = await resolver(job.q, {
+      read,
+      signal,
+    });
+    const books = [];
+    for (const candidate of resolved) {
+      const book = await verifier(candidate, { signal });
+      if (book) books.push(book);
+    }
     if (books.length) {
       const { insertBatch } = await import("../scripts/import-library.mjs");
       const budget =

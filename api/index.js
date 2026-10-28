@@ -50,13 +50,22 @@ export default async function handler(req, res) {
   try {
     if (req.method === "GET" && route === "config")
       return json(res, 200, { transport: "poll", uploads: "blob" });
-    if (req.method === "POST" && route === "admin/import") {
+    if (
+      req.method === "POST" &&
+      ["admin/import", "admin/catalog-maintenance"].includes(route)
+    ) {
       const { authorizeImport, commitImport } = await import(
         "../cloud/admin-import.js"
       );
       if (!authorizeImport(req.headers.authorization))
         throw problem("Unauthorized import.", 401);
       const payload = await body(req, 512 * 1024);
+      if (route === "admin/catalog-maintenance") {
+        const { maintainCatalog } = await import(
+          "../cloud/catalog-maintenance.js"
+        );
+        return json(res, 200, await maintainCatalog(database(), payload));
+      }
       return json(res, 200, await commitImport(database(), payload.books));
     }
     const sql = database();

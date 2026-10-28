@@ -1,3 +1,5 @@
+import { appendFile } from "node:fs/promises";
+import { verifiedBook } from "../cloud/file-verification.js";
 // Long-running operator worker. The database password never leaves Vercel.
 import { harvest } from "./harvest-library.mjs";
 import { setTimeout as pause } from "node:timers/promises";
@@ -61,7 +63,26 @@ while (!controller.signal.aborted) {
         checkpoint: "data/remote-75000.checkpoint.json",
         resume: true,
       },
-      { commit, signal: controller.signal },
+      {
+        commit,
+        verify: async (book) => {
+          try {
+            return await verifiedBook(book, { signal: controller.signal });
+          } catch (error) {
+            if (controller.signal.aborted) throw error;
+            await appendFile(
+              "data/unverified-retry.jsonl",
+              JSON.stringify({
+                book,
+                reason: "temporary file verification failure",
+                at: new Date().toISOString(),
+              }) + "\n",
+            );
+            return null;
+          }
+        },
+        signal: controller.signal,
+      },
     );
     console.log(JSON.stringify({ event: "worker-finished", ...result }));
     break;
