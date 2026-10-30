@@ -9,6 +9,7 @@ import { authorizeImport } from "../cloud/admin-import.js";
 import { createHash, randomBytes } from "node:crypto";
 import { marginInput, marginCursor } from "../cloud/margins.js";
 import { getVibe } from "../shared/vibes.js";
+import { FEATURED_IDS } from "../shared/featured.js";
 import express from "express";
 import helmet from "helmet";
 import { rateLimit } from "express-rate-limit";
@@ -267,6 +268,10 @@ function localLookup(query) {
     });
   return { status: "pending", retryAfterMs: 1500 };
 }
+app.get("/api/featured", (req, res) => {
+  const books = FEATURED_IDS.map((id) => publicBook(db.prepare("SELECT * FROM books WHERE id=? AND is_hidden=0 AND availability='downloadable'").get(id))).filter(Boolean);
+  res.json({ books });
+});
 app.get("/api/catalog", (req, res, next) => {
   try {
     const limit = Math.min(48, Math.max(1, Number(req.query.limit) || 24));

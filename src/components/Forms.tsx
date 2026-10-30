@@ -185,7 +185,6 @@ export function UploadForm({ onClose }: { onClose: () => void }) {
                   "Philosophy",
                   "Poetry",
                   "Essays",
-                  "Nonfiction",
                 ].map((c) => (
                   <option key={c}>{c}</option>
                 ))}

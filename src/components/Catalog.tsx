@@ -41,6 +41,14 @@ export default function Catalog({ onUpload }: { onUpload: () => void }) {
   const [vibe, setVibe] = useState("");
   const [tag, setTag] = useState("");
   const [books, setBooks] = useState<Book[]>([]);
+  const [featured, setFeatured] = useState<Book[]>([]);
+  useEffect(() => {
+    const controller = new AbortController();
+    api<{ books: Book[] }>("/featured", { signal: controller.signal })
+      .then((result) => setFeatured(result.books))
+      .catch(() => {});
+    return () => controller.abort();
+  }, []);
   const [total, setTotal] = useState(0);
   const [inventory, setInventory] = useState({
     indexed: 0,
@@ -140,6 +148,7 @@ export default function Catalog({ onUpload }: { onUpload: () => void }) {
   return (
     <>
       <section className="hero">
+        <div className="hero-copy">
         <h1>
           Books worth
           <br />
@@ -151,6 +160,21 @@ export default function Catalog({ onUpload }: { onUpload: () => void }) {
             Find something good <ArrowDown size={17} />
           </a>
         </div>
+        </div>
+        {featured.length > 0 && (
+          <div className="hero-shelf" aria-label="Featured fiction">
+            <span className="eyebrow">FICTION TO GET LOST IN</span>
+            <div className="hero-books">
+              {featured.map((book) => (
+                <Link to={`/book/${book.id}`} key={book.id} className="hero-book">
+                  <Cover book={book} priority />
+                  <span className="hero-book-title">{book.title}</span>
+                  <span className="hero-book-author">{book.author}</span>
+                </Link>
+              ))}
+            </div>
+          </div>
+        )}
       </section>
       <section id="catalog" className="catalog">
         <div className="section-heading">

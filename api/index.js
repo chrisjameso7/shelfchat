@@ -5,6 +5,7 @@ import { database, snapshot, rateLimit } from "../cloud/db.js";
 import { noteInput } from "../server/validation.js";
 import { resolveEditionDownload } from "../cloud/download-source.js";
 import { catalogPage, PUBLIC_BOOK } from "../cloud/catalog.js";
+import { FEATURED_IDS } from "../shared/featured.js";
 import { waitUntil } from "@vercel/functions";
 import { claimLookup, performLookup } from "../cloud/jit-search.js";
 import { canStreamSource, streamEpub } from "../cloud/epub-stream.js";
@@ -95,6 +96,14 @@ export default async function handler(req, res) {
       return json(res, 200, await moderate(database(), await body(req)));
     }
     const sql = database();
+    if (req.method === "GET" && route === "featured") {
+      const books = await sql.query(
+        `SELECT ${PUBLIC_BOOK} FROM shelfchat_books WHERE id=ANY($1::text[]) AND NOT is_hidden AND availability='downloadable' ORDER BY array_position($1::text[],id)`,
+        [FEATURED_IDS],
+      );
+      res.setHeader("Cache-Control", "public, s-maxage=60, stale-while-revalidate=60");
+      return json(res, 200, { books });
+    }
     if (req.method === "POST" && route === "reports") {
       await rateLimit(sql, req);
       const { createReport, reporterHash } = await import("../cloud/trust.js");

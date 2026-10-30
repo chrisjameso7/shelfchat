@@ -6,7 +6,7 @@ import {
   resolveOpenTitle,
   performLookup,
 } from "./jit-search.js";
-const xml = `<feed xmlns="http://www.w3.org/2005/Atom"><entry><id>urn:gutenberg:155:2</id><title>The Moonstone</title><rights>Public domain in the USA.</rights><author><name>Wilkie Collins</name></author><link rel="http://opds-spec.org/acquisition" type="application/epub+zip" length="1234" href="https://www.gutenberg.org/ebooks/155.epub.noimages"/></entry></feed>`;
+const xml = `<feed xmlns="http://www.w3.org/2005/Atom"><entry><id>urn:gutenberg:155:2</id><title>The Moonstone</title><category term="Detective fiction"/><rights>Public domain in the USA.</rights><author><name>Wilkie Collins</name></author><link rel="http://opds-spec.org/acquisition" type="application/epub+zip" length="1234" href="https://www.gutenberg.org/ebooks/155.epub.noimages"/></entry></feed>`;
 test("lookup identity is normalized; short queries do not dispatch and cached misses avoid rate-limit writes", async () => {
   assert.equal(
     lookupIdentity(" The   Moonstone ").key,

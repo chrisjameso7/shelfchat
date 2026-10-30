@@ -167,6 +167,7 @@ export async function performLookup(
     });
     const books = [];
     for (const candidate of resolved) {
+      if (!isLiterary(candidate)) continue;
       const book = await verifier(candidate, { signal });
       if (book) books.push(book);
     }
@@ -198,3 +199,4 @@ export async function performLookup(
   await sql`UPDATE shelfchat_search_jobs SET status=${status},expires_at=now()+CASE WHEN ${status}='error' THEN interval '2 minutes' ELSE interval '6 hours' END,updated_at=now() WHERE key=${job.key} AND token=${job.token}`;
   await sql`DELETE FROM shelfchat_search_jobs WHERE key IN(SELECT key FROM shelfchat_search_jobs WHERE expires_at<now()-interval '1 day' LIMIT 100)`;
 }
+import { isLiterary } from "../shared/library-scope.js";

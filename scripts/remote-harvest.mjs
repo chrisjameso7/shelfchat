@@ -60,7 +60,7 @@ while (!controller.signal.aborted) {
         "max-items": 75000,
         batch: 25,
         interval: 2000,
-        checkpoint: "data/remote-75000.checkpoint.json",
+        checkpoint: "data/remote-literary.checkpoint.json",
         resume: true,
       },
       {

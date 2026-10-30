@@ -1,22 +1,27 @@
 import { useState } from "react";
 import type { Book } from "../types";
-export function Cover({ book }: { book: Book; index?: number }) {
-  const [failedUrl, setFailedUrl] = useState<string | null>(null);
+import { coverSources } from "../covers";
+export function Cover({ book, priority = false }: { book: Book; index?: number; priority?: boolean }) {
+  const [failedUrls, setFailedUrls] = useState<string[]>([]);
+  const source = coverSources(book).find((url) => !failedUrls.includes(url));
   const palette =
     Array.from(book.id).reduce(
       (hash, letter) => (hash * 31 + letter.charCodeAt(0)) >>> 0,
       0,
     ) % 6;
-  if (book.coverUrl && failedUrl !== book.coverUrl)
+  if (source)
     return (
       <div className="cover source-cover" aria-hidden="true">
+        <span className="cover-loading-title">{book.title}</span>
         <img
-          src={book.coverUrl}
+          key={source}
+          src={source}
           alt=""
-          loading="lazy"
+          loading={priority ? "eager" : "lazy"}
+          fetchPriority={priority ? "high" : "auto"}
           decoding="async"
           referrerPolicy="no-referrer"
-          onError={() => setFailedUrl(book.coverUrl || null)}
+          onError={() => setFailedUrls((previous) => [...previous, source])}
         />
       </div>
     );

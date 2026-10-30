@@ -24,6 +24,11 @@ const book = {
     },
   },
 };
+test("Imports skip technical and uncategorized nonfiction before database writes", async () => {
+  const sql = { query: async () => { throw Error("No database work expected"); } };
+  assert.equal((await commitImport(sql, [{ ...book, title: "Differential calculus", category: "Fiction" }])).committed, 0);
+  assert.equal((await commitImport(sql, [{ ...book, category: "Nonfiction" }])).committed, 0);
+});
 test("operator import requires a strong token and restricts providers and rights", () => {
   assert.equal(authorizeImport("Bearer " + token, verifier), true);
   assert.equal(authorizeImport("Bearer " + "b".repeat(64), verifier), false);

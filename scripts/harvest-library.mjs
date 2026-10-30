@@ -15,13 +15,14 @@ import { createHash } from "node:crypto";
 import { setTimeout as sleep } from "node:timers/promises";
 import { DOMParser } from "@xmldom/xmldom";
 import { database } from "../cloud/db.js";
+import { isLiterary } from "../shared/library-scope.js";
 import { normalize, insertBatch, retry } from "./import-library.mjs";
 
 const ATOM = "http://www.w3.org/2005/Atom";
 const PG_START =
   "https://www.gutenberg.org/ebooks/search.opds/?sort_order=downloads";
 export const ARCHIVE_QUERY =
-  'mediatype:texts AND (collection:americana OR collection:toronto OR collection:smithsonian OR collection:biodiversity) AND year:[1500 TO 1929] AND NOT access-restricted-item:true AND licenseurl:("https://creativecommons.org/publicdomain/mark/1.0/" OR "http://creativecommons.org/publicdomain/mark/1.0/" OR "https://creativecommons.org/publicdomain/zero/1.0/" OR "http://creativecommons.org/publicdomain/zero/1.0/")';
+  'mediatype:texts AND subject:(fiction OR poetry OR philosophy OR essays OR literature OR novels OR drama) AND year:[1500 TO 1929] AND NOT access-restricted-item:true AND licenseurl:("https://creativecommons.org/publicdomain/mark/1.0/" OR "http://creativecommons.org/publicdomain/mark/1.0/" OR "https://creativecommons.org/publicdomain/zero/1.0/" OR "http://creativecommons.org/publicdomain/zero/1.0/")';
 const aliases = new Map([
   ["5200", "metamorphosis"],
   ["1342", "pride-prejudice"],
@@ -59,7 +60,7 @@ export function sourceUrl(value, base) {
 }
 export function categoryFor(subjects) {
   const text = plain(subjects).toLowerCase();
-  return /poetry|poems|verse/.test(text)
+  return /\b(poetry|poems|verse)\b/.test(text)
     ? "Poetry"
     : /philosoph|ethics|metaphysics/.test(text)
       ? "Philosophy"
@@ -579,6 +580,7 @@ export async function harvest(
           if (error.status === 404) book = null;
           else throw error;
         }
+        if (book && !isLiterary(book)) book = null;
         if (book && providedVerify) book = await providedVerify(book);
         if (book) {
           batch.push(book);

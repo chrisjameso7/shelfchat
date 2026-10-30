@@ -1,5 +1,6 @@
 import { createHash, timingSafeEqual } from "node:crypto";
 import { normalize, insertBatch } from "../scripts/import-library.mjs";
+import { isLiterary } from "../shared/library-scope.js";
 export function authorizeImport(
   header,
   verifier = process.env.CATALOG_IMPORT_TOKEN_SHA256,
@@ -58,7 +59,8 @@ export function importRecords(input) {
   });
 }
 export async function commitImport(sql, input) {
-  const books = importRecords(input);
+  const books = importRecords(input).filter(isLiterary);
+  if (!books.length) return { committed: 0, skipped: input.length };
   const [usage] = await sql.query(
     "SELECT pg_database_size(current_database())::float8 AS bytes, (SELECT book_count::float8 FROM shelfchat_catalog_stats WHERE id=true) AS count",
     [],

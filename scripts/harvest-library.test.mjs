@@ -18,6 +18,7 @@ export const archive = {
   metadata: {
     title: "The Moonstone",
     creator: "Wilkie Collins",
+    subject: "Detective fiction",
     year: "1868",
     mediatype: "texts",
     licenseurl: "https://creativecommons.org/publicdomain/mark/1.0/",

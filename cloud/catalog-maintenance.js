@@ -1,9 +1,18 @@
 import { probeEdition } from "./file-verification.js";
+import { TECHNICAL_TITLE } from "../shared/library-scope.js";
 export async function maintainCatalog(
   sql,
   payload,
   { probe = probeEdition } = {},
 ) {
+  if (payload.action === "scope-preview") {
+    const rows = await sql.query("SELECT category,count(*)::integer AS count FROM shelfchat_books WHERE NOT is_hidden AND (category='Nonfiction' OR title ~* $1) GROUP BY category", [TECHNICAL_TITLE]);
+    return { outsideLiteraryScope: rows };
+  }
+  if (payload.action === "scope-apply") {
+    const rows = await sql.query("UPDATE shelfchat_books SET is_hidden=true WHERE NOT is_hidden AND (category='Nonfiction' OR title ~* $1) RETURNING id", [TECHNICAL_TITLE]);
+    return { hidden: rows.length, ids: rows.map((row) => row.id) };
+  }
   if (payload.action === "cleanup") {
     const removed = await sql.query(
       "DELETE FROM shelfchat_books WHERE availability='discovery' OR ((url IS NULL OR url='') AND editions='{}'::jsonb) RETURNING id",
