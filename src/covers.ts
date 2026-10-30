@@ -1,4 +1,9 @@
 import type { Book } from "./types";
+const ARCHIVE_EDITIONS: Record<string, string> = {
+  "pride-prejudice": "1342", "strange-case": "43", "metamorphosis": "5200",
+  "meditations": "2680", "leaves-grass": "1322", "dorian-gray": "174",
+  "walden": "205", "beyond-good": "4363",
+};
 
 export function coverSources(book: Book): string[] {
   const sources: string[] = [];
@@ -8,7 +13,7 @@ export function coverSources(book: Book): string[] {
     const gutenberg = source.hostname.endsWith("gutenberg.org")
       ? source.pathname.match(/\/(?:ebooks|epub)\/(\d+)/)?.[1]
       : undefined;
-    const pg = gutenberg || book.id.match(/^pg-(\d+)$/)?.[1];
+    const pg = gutenberg || book.id.match(/^pg-(\d+)$/)?.[1] || ARCHIVE_EDITIONS[book.id];
     if (pg) {
       sources.push(`https://www.gutenberg.org/cache/epub/${pg}/pg${pg}.cover.medium.jpg`);
       sources.push(`https://www.gutenberg.org/ebooks/${pg}.cover.medium`);
