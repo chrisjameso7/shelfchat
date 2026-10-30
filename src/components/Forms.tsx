@@ -1,7 +1,7 @@
-import { useState, type FormEvent } from "react";
-import { Upload, ArrowUpRight } from "lucide-react";
+import { useRef, useState, type FormEvent } from "react";
+import { ArrowUpRight } from "lucide-react";
 import { Modal } from "./Modal";
-import { api, capabilities } from "../api";
+import { api } from "../api";
 import type { Identity } from "../types";
 export function IdentityForm({
   identity,
@@ -34,10 +34,7 @@ export function IdentityForm({
       title={identity ? "Your name in the margins." : "Come as you are."}
       onClose={onClose}
     >
-      <p>
-        No account. No password. Just a name to leave in the margins. Your
-        handle belongs to this browser and is not a verified identity.
-      </p>
+      <p>Saved in this browser. Handles are not verified identities.</p>
       <form onSubmit={submit}>
         <label>
           Your handle
@@ -54,13 +51,12 @@ export function IdentityForm({
           />
         </label>
         <label>
-          Gender / identity tag
+          Tag (optional)
           <input
             name="tag"
-            required
             maxLength={30}
             defaultValue={identity?.tag}
-            placeholder="she/her, he/him, they/them, or your own"
+            placeholder="Pronouns, a reading mood, or leave blank"
           />
         </label>
         {error && <p role="alert">{error}</p>}
@@ -72,58 +68,75 @@ export function IdentityForm({
   );
 }
 export function UploadForm({ onClose }: { onClose: () => void }) {
-  const [error, setError] = useState("");
-  const [busy, setBusy] = useState(false);
-  async function submit(e: FormEvent<HTMLFormElement>) {
-    e.preventDefault();
+  const request = useRef<{ id: string; receipt: string } | null>(null);
+  const [error, setError] = useState(""),
+    [busy, setBusy] = useState(false),
+    [submitted, setSubmitted] = useState(false);
+  async function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
     setBusy(true);
     setError("");
-    const form = new FormData(e.currentTarget);
+    const form = new FormData(event.currentTarget);
     try {
-      const config = await capabilities();
-      if (config.uploads === "blob") {
-        const data: Record<string, unknown> = Object.fromEntries(
-          form.entries(),
+      request.current ||= {
+        id: crypto.randomUUID(),
+        receipt: Array.from(
+          crypto.getRandomValues(new Uint8Array(32)),
+          (byte) => byte.toString(16).padStart(2, "0"),
+        ).join(""),
+      };
+      try {
+        const saved = JSON.parse(
+          localStorage.getItem("shelfchat.submissions.v1") || "[]",
         );
-        data.rights = form.get("rights") === "on";
-        const file = form.get("file");
-        delete data.file;
-        if (file instanceof File && file.size) {
-          const intent = await api<{ id: string; pathname: string }>(
-            "/uploads/prepare",
-            {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({
-                filename: file.name,
-                size: file.size,
-                rights: data.rights,
-              }),
-            },
+        if (
+          !saved.some((item: { id: string }) => item.id === request.current!.id)
+        )
+          localStorage.setItem(
+            "shelfchat.submissions.v1",
+            JSON.stringify(
+              [
+                ...saved,
+                { ...request.current, title: form.get("title") },
+              ].slice(-100),
+            ),
           );
-          const { upload } = await import("@vercel/blob/client");
-          const blob = await upload(intent.pathname, file, {
-            access: "public",
-            handleUploadUrl: "/api/uploads/token",
-            clientPayload: JSON.stringify({ id: intent.id }),
-            contentType:
-              file.type ||
-              (file.name.toLowerCase().endsWith(".pdf")
-                ? "application/pdf"
-                : "application/epub+zip"),
-          });
-          data.uploadId = intent.id;
-          data.blobUrl = blob.url;
-        }
-        await api("/books", {
+      } catch {}
+      const result = await api<{ id: string; receipt: string; status: string }>(
+        "/submissions",
+        {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(data),
-        });
-      } else {
-        await api("/books", { method: "POST", body: form });
+          body: JSON.stringify({
+            ...Object.fromEntries(form),
+            requestId: request.current.id,
+            receipt: request.current.receipt,
+            rights: form.get("rights") === "on",
+          }),
+        },
+      );
+      try {
+        const saved = JSON.parse(
+          localStorage.getItem("shelfchat.submissions.v1") || "[]",
+        );
+        localStorage.setItem(
+          "shelfchat.submissions.v1",
+          JSON.stringify(
+            [
+              ...saved.filter((item: { id: string }) => item.id !== result.id),
+              {
+                id: result.id,
+                receipt: result.receipt,
+                title: form.get("title"),
+              },
+            ].slice(-100),
+          ),
+        );
+      } catch {
+        setError(
+          "Save this submission receipt: " + result.id + ":" + result.receipt,
+        );
       }
-      onClose();
+      setSubmitted(true);
     } catch (e) {
       setError((e as Error).message);
     } finally {
@@ -131,64 +144,101 @@ export function UploadForm({ onClose }: { onClose: () => void }) {
     }
   }
   return (
-    <Modal title="Make room for another story." onClose={onClose}>
-      <p>
-        Contribute public-domain books or works you have permission to share.
-      </p>
-      <form onSubmit={submit}>
-        <div className="form-grid">
-          <label>
-            Book title
-            <input name="title" required maxLength={150} />
-          </label>
-          <label>
-            Author
-            <input name="author" required maxLength={100} />
-          </label>
-        </div>
-        <label>
-          Category
-          <select name="category">
-            {["Fiction", "Philosophy", "Poetry", "Essays", "Nonfiction"].map(
-              (x) => (
-                <option key={x}>{x}</option>
-              ),
-            )}
-          </select>
-        </label>
-        <label>
-          A few words about it
-          <textarea name="description" maxLength={1200} rows={3} />
-        </label>
-        <label className="file-field">
-          <Upload size={22} /> Upload PDF or EPUB · up to 25 MB
-          <input name="file" type="file" accept=".pdf,.epub" />
-        </label>
-        <label>
-          Or a Gutenberg / Internet Archive HTTPS file link
-          <input name="url" type="url" placeholder="https://…/book.epub" />
-        </label>
-        <label>
-          Link format
-          <select name="format">
-            <option>EPUB</option>
-            <option>PDF</option>
-          </select>
-        </label>
-        <label className="check">
-          <input type="checkbox" name="rights" required /> I have the right to
-          share this book.
-        </label>
-        {error && (
-          <p className="error" role="alert">
-            {error}
+    <Modal
+      title={submitted ? "Submitted for review" : "Submit a book"}
+      onClose={onClose}
+    >
+      {submitted ? (
+        <>
+          <p>Your book is pending review. It is not public yet.</p>
+          <a className="primary" href="/submissions">
+            Your submissions <ArrowUpRight size={16} />
+          </a>
+          {error && (
+            <p className="error" role="alert">
+              {error}
+            </p>
+          )}
+        </>
+      ) : (
+        <>
+          <p>
+            Submit an existing authorized file link. Private file uploads are
+            not open yet.
           </p>
-        )}
-        <button className="primary" disabled={busy}>
-          {busy ? "Adding to the shelf…" : "Contribute to the library"}
-          <ArrowUpRight size={17} />
-        </button>
-      </form>
+          <form onSubmit={submit}>
+            <div className="form-grid">
+              <label>
+                Book title
+                <input name="title" required maxLength={150} />
+              </label>
+              <label>
+                Author
+                <input name="author" required maxLength={100} />
+              </label>
+            </div>
+            <label>
+              Category
+              <select name="category" aria-label="Category">
+                {[
+                  "Fiction",
+                  "Philosophy",
+                  "Poetry",
+                  "Essays",
+                  "Nonfiction",
+                ].map((c) => (
+                  <option key={c}>{c}</option>
+                ))}
+              </select>
+            </label>
+            <label>
+              Description
+              <textarea name="description" maxLength={1200} rows={3} />
+            </label>
+            <label>
+              Existing HTTPS file link
+              <input
+                name="url"
+                type="url"
+                required
+                placeholder="https://…/book.epub"
+              />
+            </label>
+            <label>
+              Format
+              <select name="format" aria-label="Format">
+                <option>EPUB</option>
+                <option>PDF</option>
+              </select>
+            </label>
+            <label>
+              Distribution permission
+              <textarea
+                name="rightsStatement"
+                minLength={20}
+                maxLength={1000}
+                rows={3}
+                required
+                placeholder="Explain who owns this work and why it may be distributed here. Include a source or licensing reference."
+              />
+            </label>
+            <label className="check">
+              <input type="checkbox" name="rights" required />I have the right
+              to submit this work for free distribution.
+            </label>
+            <p className="mono">Submissions are reviewed before publication.</p>
+            {error && (
+              <p className="error" role="alert">
+                {error}
+              </p>
+            )}
+            <button className="primary" disabled={busy}>
+              {busy ? "Submitting…" : "Submit for review"}
+              <ArrowUpRight size={16} />
+            </button>
+          </form>
+        </>
+      )}
     </Modal>
   );
 }

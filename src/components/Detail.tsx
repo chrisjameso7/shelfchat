@@ -1,3 +1,4 @@
+import { ReportButton } from "./ReportButton";
 import {
   useState,
   useEffect,
@@ -56,7 +57,7 @@ export default function Detail({
     refresh();
     const timer = setInterval(() => {
       if (document.visibilityState === "visible") refresh();
-    }, 10000);
+    }, 60000);
     window.addEventListener("shelfchat:refresh", refresh);
     return () => {
       active = false;
@@ -107,12 +108,9 @@ export default function Detail({
           <span className="eyebrow">{book.category} / THE OPEN LIBRARY</span>
           <h1>{book.title}</h1>
           <p className="author">by {book.author}</p>
-          <p>
-            {book.description ||
-              "A new addition to our shared shelf. Open a page and see where it takes you."}
-          </p>
+          {book.description && <p>{book.description}</p>}
           <p className="mono">
-            {book.downloads.toLocaleString()} downloads
+            {book.downloads.toLocaleString()} download requests
             {book.publishedYear ? ` · Published ${book.publishedYear}` : ""}
           </p>
           <div className="edition-actions">
@@ -160,6 +158,18 @@ export default function Detail({
           {book.tags?.length ? (
             <p className="mono">{book.tags.join(" / ")}</p>
           ) : null}
+          <p className="rights-label mono">
+            {book.rights === "public-domain"
+              ? "Public domain at source; local rules may differ"
+              : book.rights === "open-license"
+                ? "Openly licensed"
+                : book.rights === "permission"
+                  ? "Contributor permission reviewed"
+                  : book.licenseUrl
+                    ? "See source licensing"
+                    : "Distribution basis not recorded"}
+          </p>
+          <ReportButton kind="book" targetId={book.id} />
           {book.sourceUrl && (
             <p className="source-credit">
               <a href={book.sourceUrl} target="_blank" rel="noreferrer">
@@ -170,7 +180,7 @@ export default function Detail({
                   {" "}
                   ·{" "}
                   <a href={book.licenseUrl} target="_blank" rel="noreferrer">
-                    Public-domain designation ↗
+                    License / source terms ↗
                   </a>
                 </>
               )}
@@ -193,7 +203,7 @@ export default function Detail({
         <form onSubmit={submit}>
           <label htmlFor="note">
             {identity
-              ? `Writing as @${identity.handle} · ${identity.tag}`
+              ? `Writing as @${identity.handle}${identity.tag ? " · " + identity.tag : ""}`
               : "Choose a handle to leave a note"}
           </label>
           <textarea
@@ -220,7 +230,7 @@ export default function Detail({
             <article key={n.id}>
               <div className="note-heading">
                 <strong>@{n.handle}</strong>
-                <span className="tag">{n.tag}</span>
+                {n.tag && <span className="tag">{n.tag}</span>}
                 <time>{new Date(n.createdAt).toLocaleString()}</time>
               </div>
               <p>{n.text}</p>

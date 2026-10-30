@@ -42,6 +42,22 @@ export default function Catalog({ onUpload }: { onUpload: () => void }) {
   const [tag, setTag] = useState("");
   const [books, setBooks] = useState<Book[]>([]);
   const [total, setTotal] = useState(0);
+  const [inventory, setInventory] = useState({
+    indexed: 0,
+    public: 0,
+    readable: 0,
+  });
+  const [collections, setCollections] = useState<{
+    tags: { tag: string; count: number }[];
+    categories: { category: string; count: number }[];
+  }>({ tags: [], categories: [] });
+  useEffect(() => {
+    const controller = new AbortController();
+    api<typeof collections>("/collections", { signal: controller.signal })
+      .then(setCollections)
+      .catch(() => {});
+    return () => controller.abort();
+  }, []);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [lookupStatus, setLookupStatus] = useState<string | null>(null);
@@ -53,7 +69,7 @@ export default function Catalog({ onUpload }: { onUpload: () => void }) {
     window.addEventListener("shelfchat:refresh", update);
     const timer = setInterval(() => {
       if (document.visibilityState === "visible") update();
-    }, 30000);
+    }, 90000);
     return () => {
       clearInterval(timer);
       window.removeEventListener("shelfchat:refresh", update);
@@ -75,12 +91,24 @@ export default function Catalog({ onUpload }: { onUpload: () => void }) {
       api<{
         books: Book[];
         total: number;
+        inventory?: { indexed: number; public: number; readable: number };
         nextCursor: string | null;
         lookup?: { status: string; retryAfterMs: number };
       }>("/catalog?" + params, { signal: controller.signal })
         .then((result) => {
           setBooks(result.books);
-          setTotal(result.total);
+          setInventory(
+            result.inventory || {
+              indexed: result.total,
+              public: result.total,
+              readable: result.total,
+            },
+          );
+          setTotal(
+            availability === "downloadable"
+              ? (result.inventory?.readable ?? result.total)
+              : result.total,
+          );
           setNextCursor(result.nextCursor);
           setLookupStatus(result.lookup?.status || null);
           if (result.lookup?.status === "pending")
@@ -129,7 +157,7 @@ export default function Catalog({ onUpload }: { onUpload: () => void }) {
           <div>
             <span className="eyebrow">THE OPEN LIBRARY</span>
             <h2>
-              A shelf with no gatekeepers
+              The library
               <span className="count">{total.toLocaleString()}</span>
             </h2>
           </div>
@@ -138,19 +166,23 @@ export default function Catalog({ onUpload }: { onUpload: () => void }) {
           </button>
         </div>
         <div className="search-row">
-          <select
-            aria-label="Book availability"
-            value={availability}
-            onChange={(e) => {
-              setAvailability(e.target.value);
-              setPage(1);
-              setCursors([null]);
-            }}
-          >
-            <option value="downloadable">Read &amp; download</option>
-            <option value="">All titles</option>
-            <option value="discovery">Discovery only</option>
-          </select>
+          {inventory.public > inventory.readable && (
+            <>
+              <select
+                aria-label="Book availability"
+                value={availability}
+                onChange={(e) => {
+                  setAvailability(e.target.value);
+                  setPage(1);
+                  setCursors([null]);
+                }}
+              >
+                <option value="downloadable">Read &amp; download</option>
+                <option value="">All titles</option>
+                <option value="discovery">Discovery only</option>
+              </select>
+            </>
+          )}
           <div className="search">
             <Search size={18} />
             <input
@@ -159,6 +191,16 @@ export default function Catalog({ onUpload }: { onUpload: () => void }) {
               value={query}
               onChange={(e) => {
                 setQuery(e.target.value);
+                setSort((current) =>
+                  e.target.value.trim()
+                    ? current === "newest"
+                      ? "relevance"
+                      : current
+                    : current === "relevance"
+                      ? "newest"
+                      : current,
+                );
+                setCursors([null]);
                 setPage(1);
               }}
               placeholder="A title, an author, a new obsession…"
@@ -185,6 +227,7 @@ export default function Catalog({ onUpload }: { onUpload: () => void }) {
               setPage(1);
             }}
           >
+            {query.trim() && <option value="relevance">Best match</option>}
             <option value="newest">Recently added</option>
             <option value="popular">Most downloaded</option>
             <option value="title">Title A–Z</option>
@@ -207,28 +250,51 @@ export default function Catalog({ onUpload }: { onUpload: () => void }) {
             </button>
           ))}
         </div>
-        <div className="collection-row">
-          <label htmlFor="collection" className="mono">
-            EXPLORE A SHELF
-          </label>
-          <select
-            id="collection"
-            value={tag}
-            onChange={(e) => {
-              setTag(e.target.value);
-              setPage(1);
-              setCursors([null]);
-            }}
-          >
-            <option value="">All collections</option>
-            <option value="booktok">BookTok picks</option>
-            <option value="romantasy">Romantasy</option>
-            <option value="dark-academia">Dark academia</option>
-            <option value="literary-fiction">Literary fiction</option>
-            <option value="queer-fiction">Queer fiction</option>
-            <option value="horror">Horror &amp; the uncanny</option>
-          </select>
-        </div>
+        {collections.tags.some((item) =>
+          [
+            "booktok",
+            "romantasy",
+            "dark-academia",
+            "literary-fiction",
+            "queer-fiction",
+            "horror",
+          ].includes(item.tag),
+        ) && (
+          <>
+            <div className="collection-row">
+              <label htmlFor="collection" className="mono">
+                EXPLORE A SHELF
+              </label>
+              <select
+                id="collection"
+                value={tag}
+                onChange={(e) => {
+                  setTag(e.target.value);
+                  setPage(1);
+                  setCursors([null]);
+                }}
+              >
+                <option value="">All collections</option>
+                {collections.tags
+                  .filter((item) =>
+                    [
+                      "booktok",
+                      "romantasy",
+                      "dark-academia",
+                      "literary-fiction",
+                      "queer-fiction",
+                      "horror",
+                    ].includes(item.tag),
+                  )
+                  .map((item) => (
+                    <option key={item.tag} value={item.tag}>
+                      {item.tag.replaceAll("-", " ")} ({item.count})
+                    </option>
+                  ))}
+              </select>
+            </div>
+          </>
+        )}
         <div className="filters">
           {[
             "All books",
@@ -237,21 +303,27 @@ export default function Catalog({ onUpload }: { onUpload: () => void }) {
             "Poetry",
             "Essays",
             "Nonfiction",
-          ].map((c) => (
-            <button
-              key={c}
-              aria-pressed={category === c}
-              className={category === c ? "selected" : ""}
-              onClick={() => {
-                setCategory(c);
-                setPage(1);
-              }}
-            >
-              {c}
-            </button>
-          ))}
+          ]
+            .filter(
+              (c) =>
+                c === "All books" ||
+                collections.categories.some((item) => item.category === c),
+            )
+            .map((c) => (
+              <button
+                key={c}
+                aria-pressed={category === c}
+                className={category === c ? "selected" : ""}
+                onClick={() => {
+                  setCategory(c);
+                  setPage(1);
+                }}
+              >
+                {c}
+              </button>
+            ))}
           <span className="mono results">
-            {books.length} shown - {total.toLocaleString()} in the archive
+            {books.length} shown - {total.toLocaleString()} public titles
           </span>
         </div>
         {error && (
@@ -398,7 +470,7 @@ export default function Catalog({ onUpload }: { onUpload: () => void }) {
         <div>
           <span className="eyebrow">FOR WRITERS</span>
           <h2 id="creator-heading">Share your book.</h2>
-          <p>Share a PDF or EPUB with the community.</p>
+          <p>Submit an authorized source link for review.</p>
           <button className="primary" onClick={onUpload}>
             Submit your work <ArrowUpRight size={16} />
           </button>

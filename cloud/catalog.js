@@ -1,14 +1,15 @@
 import { getVibe } from "../shared/vibes.js";
 // Cursor pagination keeps deep shelves independent of OFFSET and library size.
-export const PUBLIC_BOOK = `id,title,author,category,format,size::float8 AS size,downloads::float8 AS downloads,description,created_at AS "createdAt",source_url AS "sourceUrl",cover_url AS "coverUrl",license_url AS "licenseUrl",published_year AS "publishedYear",availability,tags,(SELECT coalesce(jsonb_object_agg(key,jsonb_build_object('size',value->'size')),'{}'::jsonb) FROM jsonb_each(editions)) AS editions`;
+export const PUBLIC_BOOK = `id,title,author,category,format,size::float8 AS size,downloads::float8 AS downloads,description,created_at AS "createdAt",source_url AS "sourceUrl",cover_url AS "coverUrl",license_url AS "licenseUrl",published_year AS "publishedYear",availability,tags,rights,CASE WHEN rights='permission' THEN NULL ELSE rights_statement END AS "rightsStatement",(SELECT coalesce(jsonb_object_agg(key,jsonb_build_object('size',value->'size')),'{}'::jsonb) FROM jsonb_each(editions)) AS editions`;
 const SORTS = {
   newest: ["created_at", "DESC"],
   title: ["lower(title)", "ASC"],
   popular: ["downloads", "DESC"],
 };
 export function catalogQuery(params) {
-  const sort = params.get("sort") || "newest";
-  const [column, direction] = SORTS[sort] || SORTS.newest;
+  const q = (params.get("q") || "").trim().slice(0, 160);
+  const sort = params.get("sort") || (q ? "relevance" : "newest");
+  let [column, direction] = SORTS[sort] || SORTS.newest;
   const limit = Math.min(
     48,
     Math.max(1, Math.floor(Number(params.get("limit"))) || 24),
@@ -18,8 +19,12 @@ export function catalogQuery(params) {
     values.push(value);
     return `$${values.length}`;
   };
-  const where = [];
-  const q = (params.get("q") || "").trim().slice(0, 160);
+  const where = ["NOT is_hidden"];
+  if (sort === "relevance" && q) {
+    const term = bind(q);
+    column = `(ts_rank_cd(search_document,websearch_to_tsquery('simple',${term}))+CASE WHEN lower(title)=lower(${term}) THEN 10 WHEN position(lower(${term}) in lower(title))=1 THEN 1 ELSE 0 END)`;
+    direction = "DESC";
+  }
   if (q)
     where.push(`search_document @@ websearch_to_tsquery('simple',${bind(q)})`);
   const category = params.get("category");
@@ -84,7 +89,7 @@ export async function catalogPage(sql, params) {
   const query = catalogQuery(params);
   const [rows, stats] = await Promise.all([
     sql.query(query.text, query.values),
-    sql`SELECT book_count::float8 AS count FROM shelfchat_catalog_stats WHERE id=true`,
+    sql`SELECT book_count::float8 AS indexed,visible_count::float8 AS count,readable_count::float8 AS readable FROM shelfchat_catalog_stats WHERE id=true`,
   ]);
   const hasMore = rows.length > query.limit;
   const books = rows.slice(0, query.limit);
@@ -102,5 +107,10 @@ export async function catalogPage(sql, params) {
     books: books.map(({ sortValue, ...book }) => book),
     nextCursor,
     total: stats[0]?.count || 0,
+    inventory: {
+      indexed: stats[0]?.indexed ?? stats[0]?.count ?? 0,
+      public: stats[0]?.count || 0,
+      readable: stats[0]?.readable ?? stats[0]?.count ?? 0,
+    },
   };
 }

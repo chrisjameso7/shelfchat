@@ -20,6 +20,14 @@
     {
       "source": "/community",
       "destination": "/index.html"
+    },
+    {
+      "source": "/policies/:page",
+      "destination": "/index.html"
+    },
+    {
+      "source": "/submissions",
+      "destination": "/index.html"
     }
   ],
   "headers": [

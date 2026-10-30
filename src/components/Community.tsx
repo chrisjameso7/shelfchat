@@ -1,3 +1,5 @@
+import { Link } from "react-router-dom";
+import { ReportButton } from "./ReportButton";
 import {
   useCallback,
   useEffect,
@@ -65,7 +67,16 @@ export default function Community({
       setPosts((old) =>
         [
           ...new Map(
-            [...result.posts, ...old].map((post) => [post.id, post]),
+            [
+              ...result.posts,
+              ...(loadedMore.current
+                ? old.filter((post) => {
+                    const last = result.posts[result.posts.length - 1];
+                    return last && (post.createdAt < last.createdAt ||
+                      (post.createdAt === last.createdAt && post.id < last.id));
+                  })
+                : []),
+            ].map((post) => [post.id, post]),
           ).values(),
         ].filter(
           (post) => Date.parse(post.expiresAt) > Date.parse(result.serverNow),
@@ -92,7 +103,7 @@ export default function Community({
     const timer = setInterval(() => {
       setNow(Date.now() + offset.current);
       if (document.visibilityState === "visible") void refresh();
-    }, 15000);
+    }, 30000);
     const visible = () => {
       if (document.visibilityState === "visible") {
         setNow(Date.now() + offset.current);
@@ -191,7 +202,12 @@ export default function Community({
         <h1>
           Margins<span className="community-dot">.</span>
         </h1>
-        <p>A thought between pages.</p>
+        <p>
+          A thought between pages.{" "}
+          <Link className="subtle-link" to="/policies/guidelines">
+            Room rules
+          </Link>
+        </p>
         <span className="margin-lifetime mono">
           <Clock3 size={13} />
           Posts vanish after 3 days
@@ -271,7 +287,7 @@ export default function Community({
                 >
                   <div className="note-heading">
                     <strong>@{post.handle}</strong>
-                    <span className="tag">{post.tag}</span>
+                    {post.tag && <span className="tag">{post.tag}</span>}
                     <time dateTime={post.createdAt}>
                       {new Date(post.createdAt).toLocaleString([], {
                         month: "short",
@@ -294,6 +310,7 @@ export default function Community({
                     <Clock3 size={12} />
                     {fadingLabel(post.expiresAt, now)}
                   </span>
+                  <ReportButton kind="margin" targetId={post.id} />
                 </article>
               ))
             ) : (

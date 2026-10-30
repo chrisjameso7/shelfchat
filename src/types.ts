@@ -12,6 +12,8 @@ export type Book = {
   availability?: "downloadable" | "discovery";
   tags?: string[];
   editions?: Record<string, { size: number }>;
+  rights?: "public-domain" | "open-license" | "permission" | null;
+  rightsStatement?: string | null;
   sourceUrl?: string;
   coverUrl?: string;
   licenseUrl?: string;

@@ -4,18 +4,45 @@ async function resolveCandidates(edition, format, fetcher, allowedHost) {
     try {
       const url = new URL(candidate);
       if (url.protocol !== "https:" || !allowedHost(url.hostname)) continue;
-      const response = await fetcher(url.href, {
-        headers: {
-          Range: "bytes=0-31",
-          "User-Agent": "ShelfChat/1.0 (book download availability check)",
-        },
-        signal: AbortSignal.timeout(8000),
-      });
+      const signal = AbortSignal.timeout(8000);
+      let destinationUrl = url.href,
+        response;
+      for (let redirects = 0; redirects < 5; redirects++) {
+        const destination = new URL(destinationUrl);
+        if (
+          destination.protocol !== "https:" ||
+          !allowedHost(destination.hostname) ||
+          destination.username ||
+          destination.password
+        )
+          throw Error("Unapproved file redirect");
+        response = await fetcher(destination.href, {
+          redirect: "manual",
+          headers: {
+            Range: "bytes=0-31",
+            "User-Agent": "ShelfChat/1.0 (book download availability check)",
+          },
+          signal,
+        });
+        if (
+          response.status >= 300 &&
+          response.status < 400 &&
+          response.headers.get("location")
+        ) {
+          destinationUrl = new URL(
+            response.headers.get("location"),
+            destination.href,
+          ).href;
+          await response.body?.cancel();
+          continue;
+        }
+        break;
+      }
       if (!response.ok) {
         await response.body?.cancel();
         continue;
       }
-      const destination = new URL(response.url || url.href);
+      const destination = new URL(response.url || destinationUrl);
       if (
         destination.protocol !== "https:" ||
         !allowedHost(destination.hostname)

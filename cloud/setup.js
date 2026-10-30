@@ -124,7 +124,8 @@ try {
 
 // Build-time checks use already-expired rows inside one transaction; no demo posts enter the feed.
 const marginProbeId = randomUUID();
-const [, removedMargins] = await sql.transaction([
+const [, , removedMargins] = await sql.transaction([
+  sql.query("SELECT set_config('shelfchat.suppress_metrics','on',true)", []),
   sql`INSERT INTO shelfchat_margins(id,handle,tag,text,created_at,expires_at) VALUES(${marginProbeId},'schema_probe','test','Expired lifecycle verification',now()-interval '73 hours',now()-interval '1 hour')`,
   sql`DELETE FROM shelfchat_margins WHERE id=${marginProbeId} AND expires_at<=now() RETURNING id`,
 ]);
@@ -156,7 +157,8 @@ const probePost = {
 };
 await createMargin(capturePosts, probePost);
 await createMargin(capturePosts, probePost);
-const [firstPost, repeatedPost] = await sql.transaction([
+const [, firstPost, repeatedPost] = await sql.transaction([
+  sql.query("SELECT set_config('shelfchat.suppress_metrics','on',true)", []),
   ...postQueries,
   sql`DELETE FROM shelfchat_margins WHERE id=${postProbeId} RETURNING id`,
 ]);
@@ -169,3 +171,45 @@ if (
 console.log(
   "Production margin posting and retry SQL verified without visible test posts.",
 );
+
+// Verify new trust controls in a transaction without visible posts or fabricated analytics.
+const trustProbeId = randomUUID(),
+  trustBookId = "trust-probe-" + randomUUID(),
+  trustSubmissionId = randomUUID(),
+  trustReportId = randomUUID();
+const trustResults = await sql.transaction([
+  sql.query("SELECT set_config('shelfchat.suppress_metrics','on',true)", []),
+  sql`INSERT INTO shelfchat_books(id,title,author,category,format,url,description,is_hidden) VALUES(${trustBookId},'Private verification','Schema probe','Fiction','EPUB','https://www.gutenberg.org/ebooks/155.epub.noimages','',true) RETURNING id`,
+  sql`INSERT INTO shelfchat_margins(id,handle,tag,text,hidden_at) VALUES(${trustProbeId},'schema_probe','','Hidden verification',now()) RETURNING id`,
+  sql`SELECT id FROM shelfchat_margins WHERE id=${trustProbeId} AND hidden_at IS NULL AND expires_at>now()`,
+  sql`INSERT INTO shelfchat_reports(id,book_id,reason,details,reporter_hash) VALUES(${trustReportId},${trustBookId},'other','Verification',${"0".repeat(64)}) RETURNING id`,
+  sql`INSERT INTO shelfchat_submissions(id,owner_hash,title,author,category,format,url,rights_statement) VALUES(${trustSubmissionId},${"1".repeat(64)},'Unpublished verification','Schema probe','Fiction','EPUB','https://www.gutenberg.org/ebooks/155.epub.noimages','Verification only; not a publishing request') RETURNING status`,
+  sql`SELECT id FROM shelfchat_books WHERE id=${trustBookId} AND NOT is_hidden`,
+  sql`DELETE FROM shelfchat_submissions WHERE id=${trustSubmissionId}`,
+  sql`DELETE FROM shelfchat_margins WHERE id=${trustProbeId}`,
+  sql`DELETE FROM shelfchat_books WHERE id=${trustBookId}`,
+]);
+if (
+  trustResults[3].length ||
+  trustResults[6].length ||
+  trustResults[5][0].status !== "pending"
+)
+  throw Error("Trust publication gate verification failed.");
+const [inventoryCheck] =
+  await sql`SELECT visible_count=(SELECT count(*) FROM shelfchat_books WHERE NOT is_hidden) AS visible_ok,readable_count=(SELECT count(*) FROM shelfchat_books WHERE NOT is_hidden AND availability='downloadable') AS readable_ok FROM shelfchat_catalog_stats WHERE id=true`;
+if (!inventoryCheck.visible_ok || !inventoryCheck.readable_ok)
+  throw Error("Public inventory counts do not match visible records.");
+console.log(
+  "Trust migration verified: optional tags, hidden content, private pending submissions, report constraints, and public inventory.",
+);
+const { catalogPage: rankedPage } = await import("./catalog.js");
+const ranked = await rankedPage(
+  sql,
+  new URLSearchParams({ q: "Pride and Prejudice", limit: "2" }),
+);
+if (
+  !ranked.books.length ||
+  !ranked.books[0].title.toLowerCase().includes("pride")
+)
+  throw Error("Relevance search verification failed.");
+console.log("Neon relevance-ranked search verified.");

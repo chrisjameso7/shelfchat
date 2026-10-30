@@ -33,7 +33,7 @@ export async function api<T>(
 }
 export type Capabilities = {
   transport: "poll" | "sse";
-  uploads: "blob" | "local";
+  uploads: "blob" | "local" | "review-links";
 };
 export const capabilities = () => api<Capabilities>("/config");
 export function readIdentity() {
@@ -43,8 +43,8 @@ export function readIdentity() {
     );
     return value &&
       typeof value.handle === "string" &&
-      typeof value.tag === "string"
-      ? value
+      (value.tag === undefined || typeof value.tag === "string")
+      ? { handle: value.handle, tag: value.tag || "" }
       : null;
   } catch {
     return null;

@@ -21,7 +21,7 @@ test("cloud capabilities route is available without secrets", async () => {
   assert.equal(res.statusCode, 200);
   assert.deepEqual(JSON.parse(res.body), {
     transport: "poll",
-    uploads: "blob",
+    uploads: "review-links",
   });
   assert.equal(res.headers["Cache-Control"], "no-store");
 });

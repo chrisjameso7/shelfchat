@@ -41,7 +41,7 @@ export function noteInput(body) {
     );
   return {
     handle,
-    tag: clean(body.tag, 1, 30, "Identity tag"),
+    tag: clean(body.tag ?? "", 0, 30, "Identity tag"),
     text: clean(body.text, 1, 2000, "Note"),
   };
 }

@@ -1,3 +1,12 @@
+import {
+  reportInput,
+  reporterHash,
+  submissionInput,
+  submissionIdentity,
+  ownerMatches,
+} from "../cloud/trust.js";
+import { authorizeImport } from "../cloud/admin-import.js";
+import { createHash, randomBytes } from "node:crypto";
 import { marginInput, marginCursor } from "../cloud/margins.js";
 import { getVibe } from "../shared/vibes.js";
 import express from "express";
@@ -27,6 +36,9 @@ const columns = db
   .all()
   .map((c) => c.name);
 for (const [column, type] of Object.entries({
+  is_hidden: "INTEGER NOT NULL DEFAULT 0",
+  rights: "TEXT",
+  rights_statement: "TEXT",
   tags: "TEXT NOT NULL DEFAULT '[]'",
   availability: "TEXT NOT NULL DEFAULT 'downloadable'",
   editions: "TEXT NOT NULL DEFAULT '{}'",
@@ -126,7 +138,7 @@ const clients = new Set();
 const snapshot = () => ({
   books: db
     .prepare(
-      "SELECT id,title,author,category,format,size,downloads,description,createdAt,editions,source_url AS sourceUrl,license_url AS licenseUrl,published_year AS publishedYear FROM books ORDER BY createdAt DESC",
+      "SELECT id,title,author,category,format,size,downloads,description,createdAt,editions,source_url AS sourceUrl,license_url AS licenseUrl,published_year AS publishedYear FROM books WHERE is_hidden=0 ORDER BY createdAt DESC",
     )
     .all()
     .map((b) => ({
@@ -139,7 +151,9 @@ const snapshot = () => ({
       ),
     })),
   notes: db
-    .prepare("SELECT * FROM notes ORDER BY createdAt DESC LIMIT 2000")
+    .prepare(
+      "SELECT n.* FROM notes n JOIN books b ON n.bookId=b.id WHERE b.is_hidden=0 ORDER BY n.createdAt DESC LIMIT 2000",
+    )
     .all(),
   activity: db
     .prepare("SELECT * FROM activity ORDER BY createdAt DESC LIMIT 12")
@@ -162,13 +176,22 @@ function activity(message) {
   broadcast();
 }
 app.get("/api/config", (_req, res) =>
-  res.json({ transport: "sse", uploads: "local" }),
+  res.json({ transport: "sse", uploads: "review-links" }),
 );
 function publicBook(b) {
-  if (!b) return null;
-  const { url, file, source_url, license_url, published_year, ...safe } = b;
+  if (!b || b.is_hidden) return null;
+  const {
+    url,
+    file,
+    source_url,
+    license_url,
+    published_year,
+    rights_statement,
+    ...safe
+  } = b;
   return {
     ...safe,
+    rightsStatement: b.rights === "permission" ? null : rights_statement,
     sourceUrl: source_url,
     coverUrl: b.cover_url,
     licenseUrl: license_url,
@@ -252,8 +275,16 @@ app.get("/api/catalog", (req, res, next) => {
       title: ["lower(title)", "ASC"],
       popular: ["downloads", "DESC"],
     };
-    const [column, direction] = sorts[req.query.sort] || sorts.newest;
-    const clauses = [],
+    let [column, direction] = sorts[req.query.sort] || sorts.newest;
+    const rankValues = [];
+    const rankTerm = String(req.query.q || "").slice(0, 160);
+    if (rankTerm && (req.query.sort === "relevance" || !req.query.sort)) {
+      column =
+        "(CASE WHEN lower(title)=lower(?) THEN 10 WHEN instr(lower(title),lower(?))=1 THEN 1 ELSE 0 END)";
+      direction = "DESC";
+      rankValues.push(rankTerm, rankTerm);
+    }
+    const clauses = ["is_hidden=0"],
       params = [];
     if (req.query.q) {
       clauses.push("(title LIKE ? OR author LIKE ? OR description LIKE ?)");
@@ -293,21 +324,32 @@ app.get("/api/catalog", (req, res, next) => {
       clauses.push("availability='downloadable'");
     if (req.query.availability === "discovery")
       clauses.push("availability='discovery'");
+    const signature = JSON.stringify([
+      req.query.q || "",
+      req.query.category || "",
+      req.query.format || "",
+      req.query.tag || "",
+      req.query.vibe || "",
+      req.query.availability || "",
+      req.query.sort || "",
+    ]);
     if (req.query.cursor) {
       const cursor = JSON.parse(Buffer.from(req.query.cursor, "base64url"));
       if (
+        cursor.signature !== signature ||
         typeof cursor.id !== "string" ||
         !["string", "number"].includes(typeof cursor.value)
       )
         throw Error("Invalid cursor");
       clauses.push(`(${column},id) ${direction === "ASC" ? ">" : "<"} (?,?)`);
+      if (rankValues.length) params.push(rankTerm, rankTerm);
       params.push(cursor.value, cursor.id);
     }
     const rows = db
       .prepare(
-        `SELECT *,${column} AS sortValue FROM books ${clauses.length ? "WHERE " + clauses.join(" AND ") : ""} ORDER BY ${column} ${direction},id ${direction} LIMIT ?`,
+        `SELECT *,${column} AS sortValue FROM books ${clauses.length ? "WHERE " + clauses.join(" AND ") : ""} ORDER BY sortValue ${direction},id ${direction} LIMIT ?`,
       )
-      .all(...params, limit + 1);
+      .all(...rankValues, ...params, limit + 1);
     const last = rows[Math.min(limit, rows.length) - 1];
     const lookup =
       !rows.length &&
@@ -320,11 +362,24 @@ app.get("/api/catalog", (req, res, next) => {
         : null;
     res.json({
       books: rows.slice(0, limit).map(({ sortValue, ...b }) => publicBook(b)),
-      total: db.prepare("SELECT count(*) AS count FROM books").get().count,
+      total: db
+        .prepare("SELECT count(*) AS count FROM books WHERE is_hidden=0")
+        .get().count,
+      inventory: {
+        indexed: db.prepare("SELECT count(*) AS count FROM books").get().count,
+        public: db
+          .prepare("SELECT count(*) AS count FROM books WHERE is_hidden=0")
+          .get().count,
+        readable: db
+          .prepare(
+            "SELECT count(*) AS count FROM books WHERE is_hidden=0 AND availability='downloadable'",
+          )
+          .get().count,
+      },
       nextCursor:
         rows.length > limit
           ? Buffer.from(
-              JSON.stringify({ id: last.id, value: last.sortValue }),
+              JSON.stringify({ id: last.id, value: last.sortValue, signature }),
             ).toString("base64url")
           : null,
       ...(lookup ? { lookup } : {}),
@@ -335,7 +390,9 @@ app.get("/api/catalog", (req, res, next) => {
 });
 app.get("/api/books/:id", (req, res) => {
   const book = publicBook(
-    db.prepare("SELECT * FROM books WHERE id=?").get(req.params.id),
+    db
+      .prepare("SELECT * FROM books WHERE id=? AND is_hidden=0")
+      .get(req.params.id),
   );
   if (!book) return res.status(404).json({ error: "Book not found." });
   res.json({
@@ -349,7 +406,9 @@ app.get("/api/books/:id", (req, res) => {
 });
 app.get("/api/books/:id/stream", writes, async (req, res, next) => {
   try {
-    const b = db.prepare("SELECT * FROM books WHERE id=?").get(req.params.id);
+    const b = db
+      .prepare("SELECT * FROM books WHERE id=? AND is_hidden=0")
+      .get(req.params.id);
     const edition =
       b &&
       (JSON.parse(b.editions).EPUB ||
@@ -367,7 +426,9 @@ app.get("/api/books/:id/stream", writes, async (req, res, next) => {
   }
 });
 app.get("/api/books/:id/read", writes, (req, res) => {
-  const book = db.prepare("SELECT * FROM books WHERE id=?").get(req.params.id);
+  const book = db
+    .prepare("SELECT * FROM books WHERE id=? AND is_hidden=0")
+    .get(req.params.id);
   if (!book || book.availability === "discovery")
     return res
       .status(404)
@@ -392,7 +453,7 @@ app.get("/api/books/:id/read", writes, (req, res) => {
   });
 });
 app.get("/api/books/:id/content", (req, res) => {
-  const book = db.prepare("SELECT * FROM books WHERE id=?").get(req.params.id);
+  const book = db.prepare("SELECT * FROM books WHERE id=? AND is_hidden=0").get(req.params.id);
   if (!book?.file) return res.status(404).json({ error: "File unavailable." });
   res.type(book.format === "PDF" ? "application/pdf" : "application/epub+zip");
   res.set("Content-Disposition", "inline");
@@ -408,7 +469,7 @@ app.get("/api/margins", (req, res, next) => {
     db.prepare("DELETE FROM margins WHERE expiresAt<=?").run(now);
     const rows = db
       .prepare(
-        "SELECT *,createdAt AS sortValue FROM margins WHERE expiresAt>? " +
+        "SELECT *,createdAt AS sortValue FROM margins WHERE expiresAt>? AND hidden_at IS NULL " +
           (cursor ? "AND (createdAt,id)<(?,?)" : "") +
           " ORDER BY createdAt DESC,id DESC LIMIT 31",
       )
@@ -439,12 +500,10 @@ app.post("/api/margins", writes, (req, res, next) => {
         if (
           ["handle", "tag", "text"].some((key) => existing[key] !== input[key])
         )
-          return res
-            .status(409)
-            .json({
-              error:
-                "This request was already used. Edit your draft and try again.",
-            });
+          return res.status(409).json({
+            error:
+              "This request was already used. Edit your draft and try again.",
+          });
         return res
           .status(201)
           .json({ post: existing, serverNow: new Date().toISOString() });
@@ -468,6 +527,151 @@ app.post("/api/margins", writes, (req, res, next) => {
       post.expiresAt,
     );
     res.status(201).json({ post, serverNow: new Date().toISOString() });
+  } catch (e) {
+    next(e);
+  }
+});
+const marginColumns = db.prepare("PRAGMA table_info(margins)").all();
+if (!marginColumns.some((c) => c.name === "hidden_at"))
+  db.exec("ALTER TABLE margins ADD COLUMN hidden_at TEXT");
+db.exec(
+  "CREATE TABLE IF NOT EXISTS reports(id TEXT PRIMARY KEY,book_id TEXT,margin_id TEXT,reason TEXT NOT NULL,details TEXT NOT NULL,reporter_hash TEXT NOT NULL,created_at TEXT NOT NULL,resolved_at TEXT,expires_at TEXT NOT NULL); CREATE UNIQUE INDEX IF NOT EXISTS reports_book ON reports(book_id,reporter_hash); CREATE UNIQUE INDEX IF NOT EXISTS reports_margin ON reports(margin_id,reporter_hash); CREATE TABLE IF NOT EXISTS submissions(id TEXT PRIMARY KEY,owner_hash TEXT NOT NULL,title TEXT NOT NULL,author TEXT NOT NULL,description TEXT NOT NULL,category TEXT NOT NULL,format TEXT NOT NULL,url TEXT NOT NULL,rights_statement TEXT NOT NULL,status TEXT NOT NULL DEFAULT 'pending',review_note TEXT NOT NULL DEFAULT '',created_at TEXT NOT NULL,updated_at TEXT NOT NULL);",
+);
+app.get("/api/collections", (_req, res) => {
+  const tags = db
+    .prepare(
+      "SELECT j.value AS tag,count(*) AS count FROM books b,json_each(b.tags) j WHERE is_hidden=0 AND availability='downloadable' GROUP BY j.value ORDER BY j.value LIMIT 150",
+    )
+    .all();
+  const categories = db
+    .prepare(
+      "SELECT category,count(*) AS count FROM books WHERE is_hidden=0 AND availability='downloadable' GROUP BY category",
+    )
+    .all();
+  res.json({ tags, categories });
+});
+app.post("/api/reports", writes, (req, res, next) => {
+  try {
+    const b = reportInput(req.body),
+      table = b.kind === "book" ? "books" : "margins";
+    const exists = db
+      .prepare("SELECT id FROM " + table + " WHERE id=?")
+      .get(b.targetId);
+    if (exists)
+      db.prepare(
+        "INSERT OR IGNORE INTO reports(id,book_id,margin_id,reason,details,reporter_hash,created_at,expires_at) VALUES(?,?,?,?,?,?,?,?)",
+      ).run(
+        randomUUID(),
+        b.kind === "book" ? b.targetId : null,
+        b.kind === "margin" ? b.targetId : null,
+        b.reason,
+        b.details,
+        reporterHash(req, process.env.CRON_SECRET || "local-development"),
+        new Date().toISOString(),
+        new Date(Date.now() + 30 * 86400000).toISOString(),
+      );
+    res.status(202).json({ received: true });
+  } catch (e) {
+    next(e);
+  }
+});
+app.post("/api/submissions", writes, (req, res, next) => {
+  try {
+    const b = submissionInput(req.body),
+      { id, receipt, hash } = submissionIdentity(req.body),
+      now = new Date().toISOString();
+    const previous = db.prepare("SELECT * FROM submissions WHERE id=?").get(id);
+    if (previous) {
+      if (
+        previous.owner_hash !== hash ||
+        previous.title !== b.title ||
+        previous.author !== b.author ||
+        previous.url !== b.url ||
+        previous.rights_statement !== b.rightsStatement
+      )
+        return res
+          .status(409)
+          .json({ error: "This receipt was used for a different submission." });
+      return res.status(201).json({ id, receipt, status: previous.status });
+    }
+    db.prepare(
+      "INSERT INTO submissions(id,owner_hash,title,author,description,category,format,url,rights_statement,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)",
+    ).run(
+      id,
+      hash,
+      b.title,
+      b.author,
+      b.description,
+      b.category,
+      b.format,
+      b.url,
+      b.rightsStatement,
+      now,
+      now,
+    );
+    res.status(201).json({ id, receipt, status: "pending" });
+  } catch (e) {
+    next(e);
+  }
+});
+app.get("/api/submissions/:id", (req, res) => {
+  const row = db
+    .prepare("SELECT * FROM submissions WHERE id=?")
+    .get(req.params.id);
+  if (
+    !row ||
+    !ownerMatches(
+      String(req.headers.authorization || "").replace(/^Bearer /, ""),
+      row.owner_hash,
+    )
+  )
+    return res.status(404).json({ error: "Submission not found." });
+  const { owner_hash, ...submission } = row;
+  res.json({ submission });
+});
+app.post("/api/admin/moderation", (req, res, next) => {
+  try {
+    if (!authorizeImport(req.headers.authorization))
+      return res.status(401).json({ error: "Unauthorized moderation." });
+    const b = req.body;
+    if (b.action === "queue")
+      return res.json({
+        reports: db
+          .prepare(
+            "SELECT id,book_id,margin_id,reason,details,created_at FROM reports WHERE resolved_at IS NULL ORDER BY created_at DESC LIMIT 50",
+          )
+          .all(),
+        submissions: db
+          .prepare(
+            "SELECT id,title,author,url,rights_statement FROM submissions WHERE status='pending' ORDER BY created_at LIMIT 50",
+          )
+          .all(),
+      });
+    if (["hide_margin", "restore_margin"].includes(b.action)) {
+      const result = db
+        .prepare("UPDATE margins SET hidden_at=? WHERE id=?")
+        .run(
+          b.action === "hide_margin" ? new Date().toISOString() : null,
+          b.id,
+        );
+      return res.json({ updated: result.changes });
+    }
+    if (["hide_book", "restore_book"].includes(b.action)) {
+      const result = db
+        .prepare("UPDATE books SET is_hidden=? WHERE id=?")
+        .run(b.action === "hide_book" ? 1 : 0, b.id);
+      return res.json({ updated: result.changes });
+    }
+    if (b.action === "resolve_report") {
+      const result = db
+        .prepare("UPDATE reports SET resolved_at=? WHERE id=?")
+        .run(new Date().toISOString(), b.id);
+      return res.json({ updated: result.changes });
+    }
+    return res.status(400).json({
+      error:
+        "This development endpoint supports reports and visibility changes. Submission approval uses the production operator workflow.",
+    });
   } catch (e) {
     next(e);
   }
@@ -499,71 +703,86 @@ app.get("/api/events", (req, res) => {
     broadcast();
   });
 });
-app.post("/api/books", writes, uploads.single("file"), (req, res, next) => {
-  try {
-    const b = req.body;
-    const title = clean(b.title, 1, 150, "Title");
-    const author = clean(b.author, 1, 100, "Author");
-    const category = clean(b.category, 1, 30, "Category");
-    if (
-      !["Fiction", "Philosophy", "Poetry", "Essays", "Nonfiction"].includes(
+app.post(
+  "/api/books",
+  writes,
+  (req, res, next) =>
+    process.env.SHELFCHAT_TEST_ALLOW_UPLOADS === "1"
+      ? next()
+      : res.status(410).json({
+          error: "Use the submission form. New books require review.",
+        }),
+  uploads.single("file"),
+  (req, res, next) => {
+    try {
+      const b = req.body;
+      const title = clean(b.title, 1, 150, "Title");
+      const author = clean(b.author, 1, 100, "Author");
+      const category = clean(b.category, 1, 30, "Category");
+      if (
+        !["Fiction", "Philosophy", "Poetry", "Essays", "Nonfiction"].includes(
+          category,
+        )
+      )
+        throw new Error("Choose a valid category.");
+      if (b.rights !== "on")
+        throw new Error("Confirm you have permission to share this book.");
+      if (!req.file && !b.url)
+        throw new Error("Upload a file or provide a link.");
+      let format = b.format;
+      let url = null;
+      if (req.file) {
+        const bytes = readFileSync(req.file.path);
+        format = req.file.originalname.toLowerCase().endsWith(".pdf")
+          ? "PDF"
+          : "EPUB";
+        if (
+          format === "PDF" &&
+          !bytes.subarray(0, 5).equals(Buffer.from("%PDF-"))
+        )
+          throw new Error("This is not a valid PDF.");
+        if (
+          format === "EPUB" &&
+          (!bytes.subarray(0, 2).equals(Buffer.from("PK")) ||
+            !bytes.includes(Buffer.from("application/epub+zip")))
+        )
+          throw new Error("This is not a valid EPUB.");
+      } else {
+        url = safeUrl(b.url);
+        if (!["EPUB", "PDF"].includes(format))
+          throw new Error("Choose PDF or EPUB.");
+      }
+      const description = b.description
+        ? clean(b.description, 1, 1200, "Description")
+        : "";
+      const id = randomUUID();
+      insert.run(
+        id,
+        title,
+        author,
         category,
-      )
-    )
-      throw new Error("Choose a valid category.");
-    if (b.rights !== "on")
-      throw new Error("Confirm you have permission to share this book.");
-    if (!req.file && !b.url)
-      throw new Error("Upload a file or provide a link.");
-    let format = b.format;
-    let url = null;
-    if (req.file) {
-      const bytes = readFileSync(req.file.path);
-      format = req.file.originalname.toLowerCase().endsWith(".pdf")
-        ? "PDF"
-        : "EPUB";
-      if (
-        format === "PDF" &&
-        !bytes.subarray(0, 5).equals(Buffer.from("%PDF-"))
-      )
-        throw new Error("This is not a valid PDF.");
-      if (
-        format === "EPUB" &&
-        (!bytes.subarray(0, 2).equals(Buffer.from("PK")) ||
-          !bytes.includes(Buffer.from("application/epub+zip")))
-      )
-        throw new Error("This is not a valid EPUB.");
-    } else {
-      url = safeUrl(b.url);
-      if (!["EPUB", "PDF"].includes(format))
-        throw new Error("Choose PDF or EPUB.");
+        format,
+        req.file?.size || 0,
+        description,
+        new Date().toISOString(),
+        url,
+        req.file?.filename || null,
+      );
+      activity(`A reader added ${title}`);
+      res.status(201).json({ id });
+    } catch (e) {
+      if (req.file) unlinkSync(req.file.path);
+      next(e);
     }
-    const description = b.description
-      ? clean(b.description, 1, 1200, "Description")
-      : "";
-    const id = randomUUID();
-    insert.run(
-      id,
-      title,
-      author,
-      category,
-      format,
-      req.file?.size || 0,
-      description,
-      new Date().toISOString(),
-      url,
-      req.file?.filename || null,
-    );
-    activity(`A reader added ${title}`);
-    res.status(201).json({ id });
-  } catch (e) {
-    if (req.file) unlinkSync(req.file.path);
-    next(e);
-  }
-});
+  },
+);
 app.post("/api/books/:id/notes", writes, (req, res, next) => {
   try {
-    if (!db.prepare("SELECT id FROM books WHERE id=?").get(req.params.id))
+    if (
+      !db
+        .prepare("SELECT id FROM books WHERE id=? AND is_hidden=0")
+        .get(req.params.id)
+    )
       return res.status(404).json({ error: "Book not found." });
     const note = noteInput(req.body);
     const id = randomUUID();
@@ -582,7 +801,7 @@ app.post("/api/books/:id/notes", writes, (req, res, next) => {
   }
 });
 app.get("/api/books/:id/download", writes, (req, res) => {
-  const book = db.prepare("SELECT * FROM books WHERE id=?").get(req.params.id);
+  const book = db.prepare("SELECT * FROM books WHERE id=? AND is_hidden=0").get(req.params.id);
   if (!book) return res.status(404).json({ error: "Book not found." });
   if (book.availability === "discovery")
     return res

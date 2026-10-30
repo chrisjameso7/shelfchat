@@ -1,3 +1,5 @@
+import Policy from "./components/Policy";
+import Submissions from "./components/Submissions";
 import Community from "./components/Community";
 import Catalog from "./components/Catalog";
 import Detail from "./components/Detail";
@@ -18,9 +20,7 @@ export default function App() {
   const { pathname } = useLocation();
   const [data, setData] = useState(initial);
   const [identity, setIdentity] = useState<Identity | null>(readIdentity);
-  const [modal, setModal] = useState<"identity" | "upload" | null>(() =>
-    readIdentity() ? null : "identity",
-  );
+  const [modal, setModal] = useState<"identity" | "upload" | null>(null);
   const [error, setError] = useState("");
   const [connected, setConnected] = useState(false);
   useEffect(() => {
@@ -73,7 +73,7 @@ export default function App() {
         if (config.transport === "poll") {
           const timer = window.setInterval(() => {
             if (document.visibilityState === "visible") void refresh();
-          }, 10000);
+          }, 60000);
           stop = () => clearInterval(timer);
         } else {
           const events = new EventSource("/api/events");
@@ -142,6 +142,11 @@ export default function App() {
           </div>
         )}
         <Routes>
+          <Route path="/policies/:page" element={<Policy />} />
+          <Route
+            path="/submissions"
+            element={<Submissions onSubmit={() => setModal("upload")} />}
+          />
           <Route
             path="/community"
             element={
@@ -174,7 +179,7 @@ export default function App() {
             }
           />
         </Routes>
-        {pathname !== "/community" && (
+        {pathname === "/" && (
           <section className="heartbeat" id="heartbeat">
             <div>
               <span className="eyebrow">
@@ -187,7 +192,7 @@ export default function App() {
               <span className="live">
                 <span className={connected ? "tiny-dot" : "offline-dot"} />
                 {connected
-                  ? `${data.online} surfers online`
+                  ? `~${data.online} readers active`
                   : "Reconnecting to the reading room…"}
               </span>
             </div>
@@ -216,7 +221,13 @@ export default function App() {
         <Link className="brand" to="/">
           shelfchat.
         </Link>
-        <span>An open shelf for restless minds.</span>
+        <div className="footer-links">
+          <Link to="/submissions">Contributions</Link>
+          <Link to="/policies/guidelines">Guidelines</Link>
+          <Link to="/policies/privacy">Privacy</Link>
+          <Link to="/policies/terms">Terms</Link>
+          <Link to="/policies/copyright">Copyright</Link>
+        </div>
       </footer>
       {modal === "identity" && (
         <IdentityForm

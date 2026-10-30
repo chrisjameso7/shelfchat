@@ -1,15 +1,13 @@
 import { probeEdition } from "../cloud/file-verification.js";
 import { randomUUID } from "node:crypto";
-import { head, getDownloadUrl } from "@vercel/blob";
-import { handleUpload } from "@vercel/blob/client";
+import { getDownloadUrl } from "@vercel/blob";
 import { database, snapshot, rateLimit } from "../cloud/db.js";
-import { clean, safeUrl, noteInput } from "../server/validation.js";
+import { noteInput } from "../server/validation.js";
 import { resolveEditionDownload } from "../cloud/download-source.js";
 import { catalogPage, PUBLIC_BOOK } from "../cloud/catalog.js";
 import { waitUntil } from "@vercel/functions";
 import { claimLookup, performLookup } from "../cloud/jit-search.js";
 import { canStreamSource, streamEpub } from "../cloud/epub-stream.js";
-const MAX = 25 * 1024 * 1024;
 function json(res, status, body) {
   res.statusCode = status;
   res.setHeader("Content-Type", "application/json");
@@ -50,7 +48,7 @@ export default async function handler(req, res) {
   ).replace(/^\/+|\/+$/g, "");
   try {
     if (req.method === "GET" && route === "config")
-      return json(res, 200, { transport: "poll", uploads: "blob" });
+      return json(res, 200, { transport: "poll", uploads: "review-links" });
     if (
       req.method === "POST" &&
       ["admin/import", "admin/catalog-maintenance"].includes(route)
@@ -82,9 +80,61 @@ export default async function handler(req, res) {
         removed += rows.length;
         if (rows.length < 1000) break;
       }
+      await sql.transaction([
+        sql`DELETE FROM shelfchat_presence WHERE seen_at<now()-interval '10 minutes'`,
+        sql`DELETE FROM shelfchat_rate_limits WHERE expires_at<now()`,
+        sql`DELETE FROM shelfchat_reports WHERE id IN(SELECT id FROM shelfchat_reports WHERE expires_at<=now() LIMIT 1000)`,
+      ]);
       return json(res, 200, { removed });
     }
+    if (req.method === "POST" && route === "admin/moderation") {
+      const { authorizeImport } = await import("../cloud/admin-import.js");
+      if (!authorizeImport(req.headers.authorization))
+        throw problem("Unauthorized moderation.", 401);
+      const { moderate } = await import("../cloud/trust.js");
+      return json(res, 200, await moderate(database(), await body(req)));
+    }
     const sql = database();
+    if (req.method === "POST" && route === "reports") {
+      await rateLimit(sql, req);
+      const { createReport, reporterHash } = await import("../cloud/trust.js");
+      return json(
+        res,
+        202,
+        await createReport(sql, await body(req), reporterHash(req)),
+      );
+    }
+    if (req.method === "POST" && route === "submissions") {
+      await rateLimit(sql, req);
+      const { createSubmission } = await import("../cloud/trust.js");
+      return json(res, 201, await createSubmission(sql, await body(req)));
+    }
+    const submissionRoute = route.match(/^submissions\/([a-f0-9-]{36})$/i);
+    if (req.method === "GET" && submissionRoute) {
+      const { ownSubmission } = await import("../cloud/trust.js");
+      return json(
+        res,
+        200,
+        await ownSubmission(sql, submissionRoute[1], req.headers.authorization),
+      );
+    }
+    if (req.method === "GET" && route === "collections") {
+      const [tags, categories] = await Promise.all([
+        sql.query(
+          "SELECT tag,count(*)::integer AS count FROM shelfchat_books b CROSS JOIN LATERAL unnest(b.tags) tag WHERE NOT is_hidden AND availability='downloadable' GROUP BY tag HAVING count(*)>0 ORDER BY tag LIMIT 150",
+          [],
+        ),
+        sql.query(
+          "SELECT category,count(*)::integer AS count FROM shelfchat_books WHERE NOT is_hidden AND availability='downloadable' GROUP BY category ORDER BY category",
+          [],
+        ),
+      ]);
+      res.setHeader(
+        "Cache-Control",
+        "public, s-maxage=300, stale-while-revalidate=600",
+      );
+      return json(res, 200, { tags, categories });
+    }
     if (route === "margins") {
       const { marginsFeed, createMargin } = await import("../cloud/margins.js");
       if (req.method === "GET")
@@ -125,12 +175,17 @@ export default async function handler(req, res) {
             retryAfterMs: lookup.retryAfterMs,
           };
       }
+      if (!result.lookup)
+        res.setHeader(
+          "Cache-Control",
+          "public, s-maxage=15, stale-while-revalidate=30",
+        );
       return json(res, 200, result);
     }
     const detail = route.match(/^books\/([^/]+)$/);
     if (req.method === "GET" && detail) {
       const [book] = await sql.query(
-        `SELECT ${PUBLIC_BOOK} FROM shelfchat_books WHERE id=$1`,
+        `SELECT ${PUBLIC_BOOK} FROM shelfchat_books WHERE id=$1 AND NOT is_hidden`,
         [detail[1]],
       );
       if (!book) throw problem("Book not found.", 404);
@@ -142,7 +197,7 @@ export default async function handler(req, res) {
     if (req.method === "GET" && stream) {
       await rateLimit(sql, req);
       const [book] =
-        await sql`SELECT format,url,size,editions,availability FROM shelfchat_books WHERE id=${stream[1]}`;
+        await sql`SELECT format,url,size,editions,availability FROM shelfchat_books WHERE id=${stream[1]} AND NOT is_hidden`;
       if (!book || book.availability !== "downloadable")
         throw problem("Reading edition not found.", 404);
       const edition =
@@ -158,7 +213,7 @@ export default async function handler(req, res) {
     if (req.method === "GET" && read) {
       await rateLimit(sql, req);
       const [book] =
-        await sql`SELECT format,url,editions,availability FROM shelfchat_books WHERE id=${read[1]}`;
+        await sql`SELECT format,url,editions,availability FROM shelfchat_books WHERE id=${read[1]} AND NOT is_hidden`;
       if (!book) throw problem("Book not found.", 404);
       if (book.availability !== "downloadable")
         throw problem("No authorized reading edition is available.", 404);
@@ -198,151 +253,28 @@ export default async function handler(req, res) {
           url.searchParams.get("catalogVersion"),
         ),
       );
-    if (req.method === "POST" && route === "uploads/token") {
-      const b = await body(req);
-      const response = await handleUpload({
-        request: req,
-        body: b,
-        onBeforeGenerateToken: async (pathname, clientPayload) => {
-          await rateLimit(sql, req);
-          const intent = JSON.parse(clientPayload || "{}");
-          if (!/^[0-9a-f-]{36}$/i.test(intent.id))
-            throw problem("Invalid upload request.");
-          const rows =
-            await sql`UPDATE shelfchat_uploads SET issued=true WHERE id=${intent.id} AND pathname=${pathname} AND issued=false AND consumed=false AND expires_at>now() RETURNING size`;
-          if (!rows.length)
-            throw problem(
-              "Upload request expired. Please choose the file again.",
-            );
-          return {
-            allowedContentTypes: [
-              "application/pdf",
-              "application/epub+zip",
-              "application/octet-stream",
-            ],
-            maximumSizeInBytes: Math.min(MAX, Number(rows[0].size)),
-            addRandomSuffix: false,
-            allowOverwrite: false,
-            validUntil: Date.now() + 10 * 60 * 1000,
-            tokenPayload: JSON.stringify({ id: intent.id }),
-          };
-        },
-        onUploadCompleted: async () => {},
-      });
-      return json(res, 200, response);
-    }
+    if (
+      req.method === "POST" &&
+      ["uploads/token", "uploads/prepare"].includes(route)
+    )
+      throw problem(
+        "Private file submissions are not configured. Submit a source link for review.",
+        503,
+      );
     if (req.method === "POST") {
       await rateLimit(sql, req);
       const b = await body(req);
-      if (route === "uploads/prepare") {
-        if (b.rights !== true)
-          throw problem("Confirm you have permission to share this book.");
-        const filename = clean(b.filename, 1, 200, "Filename");
-        const format = /\.pdf$/i.test(filename)
-          ? "PDF"
-          : /\.epub$/i.test(filename)
-            ? "EPUB"
-            : null;
-        if (!format) throw problem("Only PDF and EPUB files are accepted.");
-        if (!Number.isInteger(b.size) || b.size < 1 || b.size > MAX)
-          throw problem("Maximum file size is 25 MB.");
-        const id = randomUUID();
-        const pathname = `books/${id}.${format.toLowerCase()}`;
-        await sql`INSERT INTO shelfchat_uploads(id,pathname,format,size) VALUES(${id},${pathname},${format},${b.size})`;
-        return json(res, 201, { id, pathname });
-      }
-      if (route === "books") {
-        const title = clean(b.title, 1, 150, "Title"),
-          author = clean(b.author, 1, 100, "Author");
-        if (
-          !["Fiction", "Philosophy", "Poetry", "Essays", "Nonfiction"].includes(
-            b.category,
-          )
-        )
-          throw problem("Choose a valid category.");
-        if (b.rights !== true)
-          throw problem("Confirm you have permission to share this book.");
-        const description = b.description
-          ? clean(b.description, 1, 1200, "Description")
-          : "";
-        let format = b.format,
-          size = 0,
-          fileUrl;
-        if (b.uploadId) {
-          if (!/^[0-9a-f-]{36}$/i.test(b.uploadId))
-            throw problem("Invalid upload.");
-          const [intent] =
-            await sql`SELECT * FROM shelfchat_uploads WHERE id=${b.uploadId} AND consumed=false AND issued=true AND expires_at>now()`;
-          if (!intent)
-            throw problem("Upload request expired. Please upload again.");
-          const uploadUrl = new URL(String(b.blobUrl));
-          if (
-            uploadUrl.protocol !== "https:" ||
-            uploadUrl.hostname !== process.env.BLOB_STORE_HOSTNAME ||
-            decodeURIComponent(uploadUrl.pathname) !== "/" + intent.pathname
-          )
-            throw problem("Unrecognized file URL.");
-          const info = await head(uploadUrl.href);
-          if (
-            info.pathname !== intent.pathname ||
-            info.size !== Number(intent.size) ||
-            info.size > MAX
-          )
-            throw problem("Uploaded file size does not match.");
-          const fileResponse = await fetch(uploadUrl.href, {
-            headers: { Range: "bytes=0-4095" },
-            signal: AbortSignal.timeout(15000),
-          });
-          if (!fileResponse.ok)
-            throw problem("Could not validate the uploaded file.");
-          const stream = fileResponse.body.getReader();
-          const first = await stream.read();
-          await stream.cancel();
-          const prefix = Buffer.from(first.value || []);
-          format = intent.format;
-          if (
-            format === "PDF" &&
-            !prefix.subarray(0, 5).equals(Buffer.from("%PDF-"))
-          )
-            throw problem("This is not a valid PDF.");
-          if (
-            format === "EPUB" &&
-            (!prefix.subarray(0, 2).equals(Buffer.from("PK")) ||
-              !prefix.includes(Buffer.from("application/epub+zip")))
-          )
-            throw problem("This is not a valid EPUB.");
-          fileUrl = uploadUrl.href;
-          size = info.size;
-        } else {
-          fileUrl = safeUrl(b.url);
-          if (!["PDF", "EPUB"].includes(format))
-            throw problem("Choose PDF or EPUB.");
-          const verified = await probeEdition({ url: fileUrl }, format);
-          if (verified.status !== "ok")
-            throw problem(
-              "We could not verify a readable PDF/EPUB at this link. Use a Gutenberg or Internet Archive file link, or upload the file directly.",
-              400,
-            );
-          fileUrl = verified.url;
-        }
-        const id = b.uploadId || randomUUID();
-        const insert = b.uploadId
-          ? sql`WITH claimed AS (UPDATE shelfchat_uploads SET consumed=true WHERE id=${b.uploadId} AND consumed=false RETURNING id) INSERT INTO shelfchat_books(id,title,author,category,format,size,description,url) SELECT ${id},${title},${author},${b.category},${format},${size},${description},${fileUrl} FROM claimed RETURNING id`
-          : sql`INSERT INTO shelfchat_books(id,title,author,category,format,size,description,url) VALUES(${id},${title},${author},${b.category},${format},${size},${description},${fileUrl}) RETURNING id`;
-        const [rows] = await sql.transaction([
-          insert,
-          sql`INSERT INTO shelfchat_activity(message) VALUES(${`A reader added ${title}`})`,
-        ]);
-        if (!rows.length)
-          throw problem("This upload has already been added.", 409);
-        return json(res, 201, { id });
-      }
+      if (route === "books")
+        throw problem(
+          "Use the submission form. New books require review.",
+          410,
+        );
       const noteRoute = route.match(/^books\/([^/]+)\/notes$/);
       if (noteRoute) {
         const n = noteInput(b);
         const id = randomUUID();
         const result =
-          await sql`WITH inserted AS (INSERT INTO shelfchat_notes(id,book_id,handle,tag,text) SELECT ${id},id,${n.handle},${n.tag},${n.text} FROM shelfchat_books WHERE id=${noteRoute[1]} RETURNING id) INSERT INTO shelfchat_activity(message) SELECT ${`@${n.handle} left a note in the margins`} FROM inserted RETURNING id`;
+          await sql`WITH inserted AS (INSERT INTO shelfchat_notes(id,book_id,handle,tag,text) SELECT ${id},id,${n.handle},${n.tag},${n.text} FROM shelfchat_books WHERE id=${noteRoute[1]} AND NOT is_hidden RETURNING id) SELECT id FROM inserted`;
         if (!result.length) throw problem("Book not found.", 404);
         return json(res, 201, { id });
       }
@@ -354,7 +286,7 @@ export default async function handler(req, res) {
       if (requested && !["PDF", "EPUB"].includes(requested))
         throw problem("Choose PDF or EPUB.");
       const [book] =
-        await sql`SELECT id,title,format,url,editions,source_url,availability FROM shelfchat_books WHERE id=${download[1]}`;
+        await sql`SELECT id,title,format,url,editions,source_url,availability FROM shelfchat_books WHERE id=${download[1]} AND NOT is_hidden`;
       if (!book) throw problem("Book not found.", 404);
       if (book.availability !== "downloadable")
         throw problem("No authorized download is available.", 404);

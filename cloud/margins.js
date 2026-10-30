@@ -68,7 +68,7 @@ export async function marginsFeed(sql, cursorValue) {
   await sql.query(PURGE_MARGINS, []);
   const values = cursor ? [cursor.at, cursor.id] : [];
   const rows = await sql.query(
-    `SELECT id,handle,tag,text,created_at AS "createdAt",expires_at AS "expiresAt",created_at::text AS "sortValue" FROM shelfchat_margins WHERE expires_at>now() ${cursor ? "AND (created_at,id)<($1::timestamptz,$2::uuid)" : ""} ORDER BY created_at DESC,id DESC LIMIT 31`,
+    `SELECT id,handle,tag,text,created_at AS "createdAt",expires_at AS "expiresAt",created_at::text AS "sortValue" FROM shelfchat_margins WHERE expires_at>now() AND hidden_at IS NULL ${cursor ? "AND (created_at,id)<($1::timestamptz,$2::uuid)" : ""} ORDER BY created_at DESC,id DESC LIMIT 31`,
     values,
   );
   const last = rows[29];

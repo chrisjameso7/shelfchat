@@ -14,8 +14,8 @@ export async function snapshot(sql, visitor, knownVersion) {
       : sql`SELECT 1`;
   const [, activity, online] = await sql.transaction([
     presence,
-    sql`SELECT id::text AS id,message,created_at AS "createdAt" FROM shelfchat_activity ORDER BY created_at DESC LIMIT 12`,
-    sql`SELECT count(*)::integer AS count FROM shelfchat_presence WHERE seen_at>now()-interval '45 seconds'`,
+    sql`SELECT id::text AS id,message,created_at AS "createdAt" FROM shelfchat_activity WHERE created_at>now()-interval '7 days' ORDER BY created_at DESC LIMIT 12`,
+    sql`SELECT count(*)::integer AS count FROM shelfchat_presence WHERE seen_at>now()-interval '2 minutes'`,
   ]);
   return { books: [], notes: [], activity, online: online[0].count };
 }

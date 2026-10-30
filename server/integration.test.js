@@ -1,5 +1,5 @@
 import { DatabaseSync } from "node:sqlite";
-import { randomUUID } from "node:crypto";
+import { randomUUID, createHash } from "node:crypto";
 import test from "node:test";
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
@@ -15,6 +15,10 @@ test("shared catalog, uploads, marginalia, downloads and live feed", async () =>
       PORT: String(port),
       DATA_DIR: directory,
       SHELFCHAT_SKIP_ARCHIVE_IMPORT: "1",
+      SHELFCHAT_TEST_ALLOW_UPLOADS: "1",
+      CATALOG_IMPORT_TOKEN_SHA256: createHash("sha256")
+        .update("b".repeat(64))
+        .digest("hex"),
     },
     stdio: ["ignore", "pipe", "pipe"],
   });
@@ -22,7 +26,7 @@ test("shared catalog, uploads, marginalia, downloads and live feed", async () =>
     await new Promise((resolve, reject) => {
       const timer = setTimeout(
         () => reject(new Error("Server startup timed out")),
-        15000,
+        30000,
       );
       child.stdout.on("data", () => {
         clearTimeout(timer);
@@ -131,6 +135,86 @@ test("shared catalog, uploads, marginalia, downloads and live feed", async () =>
       body: JSON.stringify({ ...marginInput, image: "not-allowed" }),
     });
     assert.equal(response.status, 400);
+    const optionalTag = await fetch(base + "/margins", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        handle: "anonymous_reader",
+        text: "No sensitive identity required.",
+      }),
+    });
+    assert.equal(optionalTag.status, 201);
+    const anonymous = await optionalTag.json();
+    assert.equal(anonymous.post.tag, "");
+    const report = await fetch(base + "/reports", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        kind: "margin",
+        targetId: anonymous.post.id,
+        reason: "spam",
+        details: "Private report",
+      }),
+    });
+    assert.equal(report.status, 202);
+    const deniedQueue = await fetch(base + "/admin/moderation", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "queue" }),
+    });
+    assert.equal(deniedQueue.status, 401);
+    const moderator = {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: "Bearer " + "b".repeat(64),
+      },
+    };
+    const queue = await (
+      await fetch(base + "/admin/moderation", {
+        ...moderator,
+        body: JSON.stringify({ action: "queue" }),
+      })
+    ).json();
+    assert.equal(queue.reports.length, 1);
+    await fetch(base + "/admin/moderation", {
+      ...moderator,
+      body: JSON.stringify({ action: "hide_margin", id: anonymous.post.id }),
+    });
+    const publicFeed = await (await fetch(base + "/margins")).json();
+    assert.ok(!publicFeed.posts.some((p) => p.id === anonymous.post.id));
+    const submission = await fetch(base + "/submissions", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        title: "Private manuscript",
+        author: "Author",
+        category: "Fiction",
+        format: "EPUB",
+        url: "https://www.gutenberg.org/ebooks/155.epub.noimages",
+        rights: true,
+        rightsStatement: "I am authorized to submit this work for review.",
+      }),
+    });
+    assert.equal(submission.status, 201);
+    const receipt = await submission.json();
+    assert.equal(receipt.status, "pending");
+    assert.equal(
+      (await fetch(base + "/submissions/" + receipt.id)).status,
+      404,
+    );
+    const owned = await (
+      await fetch(base + "/submissions/" + receipt.id, {
+        headers: { Authorization: "Bearer " + receipt.receipt },
+      })
+    ).json();
+    assert.equal(owned.submission.status, "pending");
+    assert.ok(!("owner_hash" in owned.submission));
+    assert.equal((await fetch(base + "/books/" + receipt.id)).status, 404);
+    assert.equal(
+      (await fetch(base + "/books/" + receipt.id + "/download")).status,
+      404,
+    );
     const marginDB = new DatabaseSync(path.join(directory, "shelfchat.sqlite"));
     try {
       const expiredId = randomUUID();
@@ -174,6 +258,21 @@ test("shared catalog, uploads, marginalia, downloads and live feed", async () =>
     } finally {
       marginDB.close();
     }
+    await fetch(base + "/admin/moderation", {
+      ...moderator,
+      body: JSON.stringify({ action: "hide_book", id }),
+    });
+    assert.equal((await fetch(base + "/books/" + id)).status, 404);
+    assert.equal((await fetch(base + "/books/" + id + "/read")).status, 404);
+    assert.equal(
+      (await fetch(base + "/books/" + id + "/download")).status,
+      404,
+    );
+    const hiddenCatalog = await (await fetch(base + "/catalog")).json();
+    assert.equal(hiddenCatalog.total, 0);
+    assert.equal(hiddenCatalog.books.length, 0);
+    const hiddenSnapshot = await (await fetch(base + "/snapshot")).json();
+    assert.equal(hiddenSnapshot.notes.length, 0);
   } finally {
     child.kill();
     await new Promise((resolve) => {

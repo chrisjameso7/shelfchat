@@ -4,6 +4,7 @@ import { catalogQuery, catalogPage } from "./catalog.js";
 test("catalog query binds search values, limits rows and rejects mismatched cursors", () => {
   const params = new URLSearchParams({
     q: "'; DROP TABLE books; --",
+    sort: "newest",
     tag: "BookTok",
     limit: "2000000",
   });

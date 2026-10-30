@@ -1,123 +1,49 @@
 # ShelfChat
 
-An open shelf for restless minds. Vite + React + TypeScript + Tailwind. Vercel production uses a serverless API, Neon Postgres and Vercel Blob. Local development also supports the original Express/SQLite backend.
+A reader-first public-domain library with a browser reader, book marginalia and a temporary community room.
+
+## Current stack
+React 19 / TypeScript / Vite / React Router / Tailwind and CSS tokens; Vercel Node functions; Neon Postgres; SQLite/Express for local development. EPUB.js is lazy-loaded and its content is sandboxed. Existing published contributions use Vercel Blob. External source files stay at their providers.
 
 ## Run locally
+Use Node 22 and npm. Run `npm ci`, then `npm run dev`. The API defaults to port 3001; Vite proxies `/api`. Local metadata and files live in the gitignored `data/` directory. No production database credentials are needed for local SQLite development. `npm test` runs the Node test suites; `npm run build` checks TypeScript and builds Vite.
 
-Requires Node 22.13 or later and npm.
+Local catalog initialization imports the 1,000-record attributable Archive manifest. It does not seed community messages or fabricate online users. The test-only legacy upload fixture is enabled only by `SHELFCHAT_TEST_ALLOW_UPLOADS=1`; never set that in a public environment.
 
-```sh
-npm ci
-npm run dev
-```
+## Reader and community behavior
+Catalog queries use bounded keyset pagination and full-text search in production. Text searches default to relevance, with an exact-title bonus. Explicit recent/download/title sorts remain available. Collection choices use populated public records; mood filters are deterministic subject rules in `shared/vibes.js`, not personalization. Inventory distinguishes indexed/public/readable metadata counts. A download count is a request, not a completed read.
 
-Open http://localhost:5173. Vite proxies `/api` to port 3001. Identity is stored under `shelfchat.identity.v1` in browser localStorage. It is an editable display identity, not an authenticated or unique account. Anonymous browsing and downloading remain available when the welcome dialog is dismissed.
+Browser handles are optional for browsing and unverified. The identity tag is optional. Public community posts are text-only, at most 500 characters, and expire from API results after 72 hours. SQL enforces their lifetime. Physical cleanup happens on feed reads and a daily authenticated cron; backups may retain prior states. Book-specific marginalia remains separate and persistent. Posting has a 15-second client deadline and idempotent retry IDs. Source failures are not silently treated as proof a book is permanently invalid.
 
-```sh
-npm test
-npm run build
-npm start
-```
+Presence is an approximate count of visitor IDs active within two minutes, not verified humans. Public activity comes from recorded events, not simulated messages. Client polling is bounded and visibility-aware. Catalog/collection responses use short shared caches; community and private receipt responses are not shared-cacheable.
 
-Production serves both the SPA and API from port 3001, including direct `/book/:id` navigation. Do not deploy just `dist` to static hosting: the shared API is required.
+## Reports and contributions
+Book/post Report controls create private operator reports with daily keyed duplicate hashes; they do not publish the reporter's IP or automatically remove content. Operators use the authenticated moderation API/CLI described in `docs/TRUST-MIGRATION.md`. Visibility changes are reversible and applied to catalog/detail/read/download paths.
 
-## Deploy on Vercel
+New contributions use existing HTTPS source links and a specific rights statement. They remain in a private pending table, outside the catalog, until an operator reviews permission and verifies an eligible reading file. Submission receipts grant private status access and are stored as hashes server-side. The browser saves its receipt before submitting so a lost response can be retried without creating a new submission. Receipts are capabilities, not verified author accounts. Private file upload storage, public author profiles, editing and recovery across devices are not implemented. New public Blob uploads and automatic public book creation are intentionally closed; existing books/files remain available.
 
-The GitHub-connected Vercel project is `shelfchat`. `vercel.json` serves the SPA, rewrites `/api/*` to `api/index.js`, and runs `npm run vercel-build`. That build inspects the database, applies the idempotent schema in `cloud/schema.sql`, imports attributable public-domain books without overwriting existing records, and builds the frontend.
+There are no subscriptions, paid placements, billing provider, commercial book delivery or fake author analytics in this version. Operator metrics are daily aggregate new posts/reports/submissions/download requests, beginning with this release. They do not contain search terms, handles or personal reading histories. Test probes suppress metric recording and never leave visible demo posts.
 
-Required server environment variables:
+## Deploy and configure
+Production deploys from GitHub main through Vercel. `vercel-build` runs the idempotent schema/setup verification, then the frontend build. Production credentials remain server-only:
 
-- `DATABASE_URL`: provisioned by the Neon Marketplace integration.
-- `BLOB_READ_WRITE_TOKEN`: provisioned by the Vercel Blob connection.
-- `BLOB_STORE_HOSTNAME`: the exact public hostname of the connected Blob store.
+- `DATABASE_URL`: Neon connection.
+- `CRON_SECRET`: authenticates `/api/cron/margins-cleanup` (daily, midnight UTC).
+- `CATALOG_IMPORT_TOKEN_SHA256`: verifier for the private operator/import token.
+- `BLOB_READ_WRITE_TOKEN` / `BLOB_STORE_HOSTNAME`: retained for previously published Blob files.
+- `CATALOG_LOOKUPS_ENABLED`: optional on-demand-source lookup switch.
+- `CATALOG_STORAGE_BUDGET_MB`: ingestion headroom guard, not a provider billing limit.
 
-Keep all three server-side; do not add a `VITE_` prefix. Production and preview use the connected Neon database. Use a separate Neon branch/project if you want isolated preview data. The database connection uses the database owner; RLS is enabled with no public policies, and clients only access data through the validated server API. Never expose the database owner connection string.
+Never put database, Blob, receipt or operator credentials in a `VITE_` variable or commit an environment file. An integration-created public Neon auth URL is unused and does not mean author authentication is implemented. No new service or paid-plan upgrade is part of this release.
 
-Files upload directly from the browser to Blob with short-lived, size-limited tokens tied to single-use database intents. The API validates the uploaded file's signature, exact path and size before adding it to the catalog. The application accepts anonymous contributions intentionally; configure moderation and cleanup for abandoned uploads before operating at scale. Download counters measure initiated downloads, including redirects to external providers.
+## Authorized catalog workers
+`npm run catalog:import` streams JSON/JSONL/CSV and gzip inputs in bounded PostgreSQL batches; use its `--dry-run`, `--checkpoint` and `--resume` options. `npm run catalog:harvest` uses the supported provider metadata feeds. `npm run catalog:grow:remote` loads the gitignored operator environment file, verifies reading-file signatures, commits batches through the authenticated API and resumes checkpoints. It runs on the operator's computer, so that machine must remain awake and online. Targets are source-record limits, not guarantees of that many distinct readable books.
 
-The cloud community feed refreshes every 10 seconds, immediately after your own contributions, and when you return to the tab. Online count measures browser sessions seen in the last 45 seconds. It does not use instance-local connection counts. Rate limiting is stored in Postgres and shared across function instances.
+`node --env-file=.env.harvest.local scripts/audit-readable.mjs` audits reading-file availability, retaining transient/uncertain failures and requiring repeat checks before pruning. `node --env-file=.env.harvest.local scripts/moderate.mjs --action queue` reads the private review queue and recent aggregate metrics. Publishing/removal actions require deliberate operator review; see the operations document.
 
-```sh
-npm ci
-# After loading the real cloud variables in your shell:
-npm run db:setup
-npm run build
-```
+## Documentation and limits
+- `docs/AUDIT-2026-10-30.md`: observed starting state and audit risks.
+- `docs/DESIGN-SYSTEM.md`: tokens and product-interface rules.
+- `docs/TRUST-MIGRATION.md`: data changes, operator workflow, retention and safe rollback.
 
-## Deploy the standalone server
-
-Use a long-running Node host or Docker with **one instance and a persistent volume** mounted at `/app/data`. SQLite and uploaded files must survive redeploys. Set `PORT` and `DATA_DIR` through the host; `.env.example` documents configuration. Node does not auto-load `.env` here. Configure HTTPS and your `shelfchat.app` DNS with the host. The Docker image runs as an unprivileged user; the mounted volume must be writable by UID 1000.
-
-```sh
-docker build -t shelfchat .
-docker run -p 3001:3001 -v shelfchat-data:/app/data shelfchat
-```
-
-For a reverse proxy, disable buffering on `/api/events` and allow connections longer than 25 seconds. Set `TRUST_PROXY` to the exact number of trusted proxies only if required for rate limiting. Online count measures active browser connections, so multiple tabs count separately. Counters for external files record a download request; the app cannot confirm completion at an external provider.
-
-Back up the SQLite database using SQLite's backup API (or stop the process and copy the entire data directory, including WAL files), together with `data/files`. Multi-instance deployment requires moving the database, files and event fan-out to shared services.
-
-## Features and structure
-
-- `src/App.tsx`: catalog search, category/format filters, sorting, book routing, Marginalia and activity.
-- `src/components`: accessible native dialog forms, editable local identity and contributions.
-- `server/index.js`: validated API, upload storage, prepared SQL, download responses, rate limiting, security headers and live SSE snapshots.
-- Catalog data comes from attributable imports, authorized source lookups, or community contributions; no demo books or fabricated counters are generated.
-- `server/*.test.js`: input validation and integration coverage for uploads, downloads, counters, notes and live connections.
-- `.github/workflows/ci.yml`: clean install, tests and production build.
-
-API: `GET /api/snapshot`, `GET /api/events`, `GET /api/health`, `POST /api/books` (multipart), `POST /api/books/:id/notes` (JSON), `GET /api/books/:id/download`.
-
-## Public-domain catalog import
-
-`cloud/archive-books.json` contains 1,000 distinct historical book records sourced from institutional collections at Internet Archive. Each record includes a source page, an explicit Creative Commons public-domain designation, publication year, and PDF and EPUB file URLs, sizes and source checksums. The EPUBs are OCR-derived and their typography can vary. Files remain hosted by Internet Archive, and download availability depends on that service.
-
-The catalog displays 24 books per page; search and format/category filters cover the entire collection. A single book page offers each available format separately. `GET /api/books/:id/download?format=PDF` or `?format=EPUB` selects the file while retaining the book's shared download counter and Marginalia. The cloud API checks the source's file signature and can try two alternate Archive hosts before redirecting, so a broken source host does not immediately lead to a dead link. If all copies are unavailable, it returns a temporary-unavailability error without incrementing the counter.
-
-Cloud setup imports this manifest once using stable IDs and `ON CONFLICT DO NOTHING`, verifies all 1,000 records have both formats, and preserves existing contributions, notes and download counters. Subsequent cloud refreshes send only activity and counters when the catalog version is unchanged, avoiding repeated transfers of the full library. The standalone SQLite server imports the same manifest automatically; integration tests set `SHELFCHAT_SKIP_ARCHIVE_IMPORT=1` to keep their isolated fixtures small.
-
-To rebuild the manifest from cached source metadata, run `node scripts/build-archive-import.mjs /path/to/archive-cache 1000`. The cache directory's parent must contain `archive-candidates.json`, ordered by source popularity. The builder rejects restricted items, missing formats, duplicate title/author pairs, missing publication years, and records without the expected public-domain designation. The source discovery uses English texts published no later than 1929 in the `americana`, `toronto`, `library_of_congress`, `cornell`, `smithsonian`, and `cdl` collections, with both PDF and EPUB formats indexed. Metadata requests should identify the client, be cached, limit concurrency, and respect rate limits.
-
-Uploads accept PDF/EPUB up to 25 MB with signature validation, or public HTTPS links. Contributors must affirm sharing rights. Rendered text is escaped by React. This anonymous contribution model intentionally has no account ownership or impersonation protection. Before a public launch at scale, establish moderation/takedown operations, malware scanning and quotas appropriate to your host. File signature checks are not malware scanning. Public-domain status varies by jurisdiction; review source rights for your audience. External links depend on the provider's availability.
-
-Cloud resources are provisioned separately through Vercel Marketplace. The repository does not purchase or configure a custom domain automatically.
-
-## Large catalogs and browser reader
-
-See [the two-million-record operations guide](docs/catalog-at-scale.md) for streaming JSON/CSV imports, Open Library dump preparation, resumable checkpoints, rights metadata, indexed cursor pagination, database sizing, and EPUB/PDF browser reading. The repository does not bundle two million files; discovery records and downloadable editions are explicitly distinct.
-
-## Source ingestion and on-demand search
-
-See [the ingestion and JIT runbook](docs/ingestion-and-jit.md) for the background worker, provider limits, resume checkpoints, durable search cache, readable-first catalog, EPUB streams and storage budgets.
-
-## Editorial discovery and 75,000-book growth target
-
-The four atmosphere chips query the existing full-text and tag indexes. Their subject rules live in `shared/vibes.js`; explicit matching tags also qualify. These are editorial subject associations, not claims about a book's exact mood. Filters compose with search, availability, format and category. Changing atmosphere resets cursor pagination, and filtered misses do not start unrelated external lookups.
-
-The hero labels 45,000+ as a library goal until the measured inventory reaches that threshold. The real database count is displayed separately. The 75,000 figure is a growth target, never a seeded or fabricated inventory.
-
-Run `npm run catalog:grow` on a long-running Node 22 worker with its server-only `DATABASE_URL` configured. This resumes the authorized Gutenberg/Archive harvester, examining up to 75,000 source items in batches of 500, with a 750 MiB database guard. Examined items are not guaranteed to be accepted or unique; only eligible public-domain EPUB/PDF editions are committed. Source availability, rate limits and duplicate books determine the final count. Re-running resumes committed progress; it does not add placeholder records. Do not run this long ingestion inside a deployment build or browser request. Monitor checkpoint accepted/rejected counts and actual Neon storage before raising the target.
-
-### Running the production import without exporting database credentials
-
-`npm run catalog:grow:remote` runs a long-lived local operator worker. Configure `SHELFCHAT_IMPORT_ENDPOINT` and a random 32-byte hexadecimal `SHELFCHAT_IMPORT_TOKEN` in the gitignored `.env.harvest.local`; configure only its SHA-256 verifier as the sensitive production Vercel variable `CATALOG_IMPORT_TOKEN_SHA256`. Never put the operator token in frontend/VITE variables. The production endpoint authorizes before accessing Neon and accepts only bounded batches of attributable public-domain editions from Gutenberg/Archive provider hosts. It accepts metadata, never SQL. Rotate the token to revoke a worker.
-
-The worker commits 25 books at a time, checkpoints only after successful production writes, resumes failed work, and stops on authorization, source blocking or capacity errors. Retries are idempotent and preserve community data. Its target is 75,000 examined source records; rejected/duplicate records do not inflate inventory. The endpoint stops conservatively before 75,000 total records or 750 MB measured database storage. A local background run requires this computer to remain awake and connected. Progress is in `data/remote-75000.checkpoint.json`; operator stdout reports each production commit and measured total. Do not run two workers against the same checkpoint. No scheduled task or paid worker is provisioned automatically.
-
-### Reading-edition quality and cleanup
-
-The production bulk worker verifies actual PDF signatures or the EPUB ZIP/mimetype header before committing a book, retaining only passing editions. A failed network request is retried rather than treated as proof a book is broken. On-demand cloud search uses the same file verification before caching a resolved book. A signature check is an availability/format screen, not proof that every page in a third-party file renders correctly.
-
-Run `node --env-file=.env.harvest.local scripts/audit-readable.mjs` to audit existing records through the authenticated maintenance endpoint. It deletes metadata-only records immediately; for broken external files it requires two local failures plus a fresh server recheck, and deletes only if the stored revision is unchanged. Temporary failures, 403/429 responses and unapproved hosts are retained as uncertain. Local audit progress is checkpointed under `data/`. It never deletes Blob files; it removes unusable catalog records and their associated notes through the existing foreign-key cascade. Bulk source files remain at their external providers and do not consume Blob storage. User-uploaded Blob files already undergo format-signature checks on submission.
-
-## Community / Margins
-
-`/community` is a separate, text-only community feed. It uses the existing local browser handle and identity tag, accepts at most 500 characters, and renders posts as literal text. Extra payload fields (including attachments or client expiry timestamps) are rejected. The API limits writes using the existing server rate limiter. No demo posts are seeded, and community text is not copied into the permanent activity feed.
-
-Neon stores margins in `shelfchat_margins` with server-generated timestamps and a database check enforcing exactly 72 hours between creation and expiration. RLS blocks direct public table access. The feed filters expired rows using database time, uses bounded cursor pagination, polls every 15 seconds while visible, and removes loaded posts when their TTL ends. The UI adjusts its clock against API server time.
-
-Expired records are purged in indexed batches on feed reads. A production Vercel Cron job calls `/api/cron/margins-cleanup` daily (`0 0 * * *`, UTC), authenticated by the sensitive server-only `CRON_SECRET`. No laptop process is required for this community cleanup. Posts disappear at 72 hours; physical deletion occurs on a later feed visit or scheduled sweep, rather than guaranteeing a separate database timer for every row. On a quiet site, rows may remain expired until that daily sweep; backups may retain previous database states. The current sweep processes at most 20,000 expired records per invocation, with further batches handled by subsequent reads/sweeps.
-
-Local development uses the SQLite `margins` table and a background cleanup interval, matching the API payloads and lifetime. Build verification tests Neon lifecycle constraints and purge behavior using already-expired rows inside a transaction; no visible test posts reach production. Per-book marginalia remains separate and retains its existing behavior.
-
-Posting requests have a 15-second client deadline and retain the draft on failure. A client-generated request ID makes a repeated submission return the existing post without extending its lifetime; conflicting reuse is rejected. Neon posting and retry SQL are also exercised during deployment inside an insert/retry/delete transaction, leaving no visible test posts.
+Policy pages describe actual current behavior, not legal compliance. The founder has not yet supplied a public legal/contact identity. Formal takedown contact, regular moderation coverage, backup/restore exercises, heavier load testing and an owned private author platform remain work before a broad public launch.

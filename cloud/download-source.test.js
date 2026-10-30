@@ -55,3 +55,21 @@ test("valid EPUB source is returned without requesting alternate copies", async 
   );
   assert.equal(calls, 1);
 });
+
+test("download resolution checks every redirect before sending a request outside the provider", async () => {
+  const calls = [];
+  await assert.rejects(
+    resolveArchiveDownload(
+      { url: "https://archive.org/download/work/file.pdf" },
+      "PDF",
+      async (url) => {
+        calls.push(url);
+        return new Response("", {
+          status: 302,
+          headers: { location: "https://127.0.0.1/private" },
+        });
+      },
+    ),
+  );
+  assert.equal(calls.length, 1);
+});
